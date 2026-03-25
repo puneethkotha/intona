@@ -1,0 +1,3382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intona</title>
+
+  <!--
+    CDN dependencies — pinned to specific versions.
+    Do NOT use @latest — CDN latest references have caused silent breakage.
+
+    Pitchy (McLeod Pitch Method, NOT YIN):
+      Global: pitchy.PitchDetector
+      Used by: AudioPipeline (M5)
+
+    MediaPipe Tasks Vision:
+      Global: mpTasksVision (set via importmap or direct access from module)
+      Used by: CVPipeline (M6)
+      WASM assets served from the same CDN path.
+  -->
+  <!--
+    Pitchy v4 ships ESM only — no UMD build exists.
+    Loaded via dynamic import() inside AudioPipeline.init() (M5):
+      const mod = await import('https://cdn.jsdelivr.net/npm/pitchy@4.0.1/+esm');
+
+    MediaPipe Tasks Vision ships ESM only (vision_bundle.mjs) — no UMD/IIFE build exists.
+    vision_bundle.js DOES NOT EXIST on the CDN — loading it via <script src> silently 404s.
+    Loaded via dynamic import() inside CVPipeline.init():
+      const { FilesetResolver, PoseLandmarker, HandLandmarker } =
+        await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+  -->
+
+  <style>
+    /* ================================================================
+       DESIGN TOKENS
+       Extracted verbatim from erhu_coach_screen_mockup.html and
+       erhu_note_comparison_panel.html. Do not change these values
+       without updating the mockup reference files.
+    ================================================================ */
+    :root {
+      --bg:            #111;
+      --teal:          #5DCAA5;
+      --amber:         #EF9F27;
+      --red:           #E24B4A;
+      --blue-ref:      #378ADD;
+      --purple-f2:     #7F77DD;
+      --orange-f3:     #D85A30;
+
+      --text:          #fff;
+      --text-dim:      rgba(255,255,255,0.55);
+      --text-faint:    rgba(255,255,255,0.35);
+      --text-label:    rgba(255,255,255,0.40);
+
+      --badge-bg:      rgba(255,255,255,0.12);
+      --badge-border:  rgba(255,255,255,0.25);
+      --panel-bg:      rgba(255,255,255,0.06);
+      --panel-border:  rgba(255,255,255,0.10);
+      --overlay-bg:    rgba(0,0,0,0.55);
+
+      --r-badge:       10px;
+      --r-panel:       8px;
+
+      --font: -apple-system, 'Segoe UI', sans-serif;
+    }
+
+    /* ================================================================
+       RESET + BASE
+    ================================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow: hidden;
+    }
+    [hidden] { display: none !important; }
+
+    /* ================================================================
+       START SCREEN
+       Full-screen, shown on load. Hidden after user clicks Start.
+       Camera/mic are NOT requested here — that happens in M2.
+    ================================================================ */
+    #start-screen {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .start-inner {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 20px;
+      max-width: 360px;
+      text-align: center;
+      padding: 32px;
+    }
+    .start-inner h1 {
+      font-size: 36px; font-weight: 500;
+      color: var(--text); letter-spacing: -0.02em;
+    }
+    .start-inner .subtitle {
+      font-size: 14px; color: var(--text-dim);
+    }
+    .permission-note {
+      background: var(--panel-bg);
+      border: 0.5px solid var(--panel-border);
+      border-radius: var(--r-panel);
+      padding: 12px 16px;
+      font-size: 12px; color: var(--text-dim);
+      line-height: 1.6; text-align: left;
+    }
+    .permission-note strong { color: var(--amber); font-weight: 500; }
+    #btn-start {
+      background: var(--teal); color: #111;
+      border: none; border-radius: 8px;
+      padding: 12px 32px;
+      font-size: 15px; font-weight: 500;
+      cursor: pointer; font-family: var(--font);
+      transition: opacity 0.15s;
+    }
+    #btn-start:hover  { opacity: 0.88; }
+    #btn-start:active { opacity: 0.72; }
+    #btn-start:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* ================================================================
+       CALIBRATION SCREEN
+       Shown after permissions granted, before session starts.
+       Logic wired in Milestone 5.
+    ================================================================ */
+    #calibration-screen {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 90;
+    }
+    .calib-inner {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 24px;
+      max-width: 400px;
+      text-align: center; padding: 32px;
+    }
+    .calib-inner h2 { font-size: 22px; font-weight: 500; }
+    .calib-inner p  { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+    .calib-note-display {
+      font-size: 72px; font-weight: 500;
+      color: var(--teal); line-height: 1;
+    }
+    .calib-ring {
+      width: 80px; height: 80px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.12);
+      border-top-color: var(--teal);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .calib-ring.listening { animation: spin 1.4s linear infinite; }
+    .calib-status { font-size: 12px; color: var(--text-dim); min-height: 18px; }
+    /* Phase-2 collection progress bar (M-pending) */
+    #calib-progress {
+      width: 80px; height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px; overflow: hidden;
+      margin: 4px auto 0;
+    }
+    #calib-progress-fill {
+      height: 100%; width: 0%;
+      background: var(--teal); border-radius: 2px;
+      transition: width 0.12s linear;
+    }
+    /* FPS readout — dim developer indicator in BPM badge */
+    #bpm-badge .fps-label {
+      font-size: 8px; color: var(--text-faint);
+      margin-top: 2px; opacity: 0.55;
+    }
+    #btn-skip-calib {
+      background: transparent;
+      border: 0.5px solid var(--panel-border);
+      border-radius: 6px;
+      color: var(--text-dim); font-size: 12px;
+      padding: 8px 20px; cursor: pointer;
+      font-family: var(--font); transition: color 0.15s, border-color 0.15s;
+    }
+    #btn-skip-calib:hover { color: var(--text); border-color: rgba(255,255,255,0.3); }
+
+    /* ================================================================
+       MAIN APP
+       All zones match erhu_ui_zones.svg.
+       Hidden until session starts.
+    ================================================================ */
+    #app {
+      position: fixed; inset: 0;
+      background: var(--bg);
+    }
+
+    /* Camera feed fills background */
+    #camera-feed {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* mirror — natural for self-view practice */
+    }
+
+    /* Skeleton canvas — same size as camera, drawn by CVPipeline (M6) */
+    #skeleton-canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      transform: scaleX(-1); /* must match camera mirror */
+    }
+
+    /* ---- TOP OVERLAY ---- */
+    #overlay-top {
+      position: absolute; top: 0; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 14px 16px;
+      z-index: 10;
+    }
+
+    /* top-left: note badge */
+    .live-indicator {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--red); flex-shrink: 0;
+    }
+    #note-badge {
+      background: var(--badge-bg);
+      border: 1px solid var(--badge-border);
+      border-radius: var(--r-badge);
+      padding: 8px 18px; text-align: center;
+    }
+    #note-badge .note-name {
+      font-size: 28px; font-weight: 500;
+      color: var(--text); line-height: 1;
+    }
+    #note-badge .note-sub {
+      font-size: 11px; color: var(--text-dim); margin-top: 3px;
+    }
+    /* Drill state: coloured top border on the note badge.
+       WAITING = teal (ready to play), ATTEMPT = amber (recording),
+       FEEDBACK_HOLD/ANALYZING = blue (evaluating). No class = neutral. */
+    #note-badge.ds-waiting { border-top: 2px solid rgba(93,202,165,0.75); }
+    #note-badge.ds-attempt { border-top: 2px solid rgba(239,159,39,0.85); }
+    #note-badge.ds-hold    { border-top: 2px solid rgba(55,138,221,0.75); }
+
+    /* ---- PITCH CENTS BAR — live intonation indicator (M13) ----
+       Horizontal bar inside the note badge. Centre = in-tune.
+       Fills left (flat) or right (sharp); colour tracks error magnitude.
+       Width is driven by UIRenderer.updateOverlays() every slow-loop tick. */
+    #cents-bar {
+      margin-top: 6px;
+      height: 4px;
+      position: relative;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    /* 1 px centre marker — always visible */
+    #cents-center-tick {
+      position: absolute; top: 0; bottom: 0;
+      left: calc(50% - 0.5px); width: 1px;
+      background: rgba(255,255,255,0.28);
+      z-index: 1;
+    }
+    #cents-bar-fill {
+      position: absolute; top: 0; height: 100%;
+      border-radius: 2px;
+      transition: width 0.12s linear, left 0.12s linear, background 0.2s ease;
+    }
+
+    /* top-center: session phase banner + BPM badge stacked */
+    #top-center {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 5px;
+      align-self: flex-start; margin-top: 2px;
+    }
+    /* M17: session progress bar + label */
+    #session-progress-wrap {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      width: 100%;
+    }
+    #session-progress-bar {
+      width: 100%; height: 3px;
+      background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden;
+    }
+    #session-progress-fill {
+      height: 100%; width: 0%;
+      background: var(--teal); border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    #session-progress-label {
+      font-size: 9px; color: var(--text-faint);
+      letter-spacing: 0.06em;
+    }
+    #phase-banner {
+      background: var(--badge-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 11px; color: var(--text-dim);
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    /* BPM badge — from erhu_coach_screen_mockup.html .tempo-box */
+    #bpm-badge {
+      background: var(--overlay-bg);
+      border: 0.5px solid var(--panel-border);
+      border-radius: 6px;
+      padding: 4px 12px;
+      text-align: center;
+    }
+    #bpm-badge .bpm-val   { font-size: 14px; font-weight: 500; color: var(--text); }
+    #bpm-badge .bpm-label { font-size: 9px;  color: var(--text-faint); margin-top: 1px; }
+
+    /* top-right: session score + skill track mini-bars */
+    #session-badge {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: var(--r-badge);
+      padding: 8px 14px; text-align: right;
+    }
+    #session-badge .session-score {
+      font-size: 22px; font-weight: 500; color: var(--teal);
+    }
+    #session-badge .session-label {
+      font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px;
+    }
+    .skill-bars { display: flex; flex-direction: column; gap: 4px; margin-top: 7px; }
+    .skill-bar-row { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+    .skill-bar-name { font-size: 9px; color: var(--text-faint); width: 38px; text-align: right; }
+    .skill-bar-track {
+      width: 58px; height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px; overflow: hidden;
+    }
+    .skill-bar-fill {
+      height: 100%; border-radius: 2px;
+      background: var(--teal);
+      transition: width 0.4s ease, background 0.3s ease;
+    }
+    .skill-bar-fill.low  { background: var(--amber); }
+    .skill-bar-fill.poor { background: var(--red); }
+
+    /* ---- BOTTOM PANEL ---- */
+    #overlay-bottom {
+      position: absolute;
+      bottom: 44px; /* sits above the 40px feedback bar */
+      left: 0; right: 0;
+      padding: 12px 14px;
+      display: flex; gap: 10px;
+      align-items: flex-end;
+      z-index: 10;
+    }
+
+    /* Common panel style (from erhu_note_comparison_panel.html) */
+    .panel {
+      background: var(--overlay-bg);
+      border: 0.5px solid var(--panel-border);
+      border-radius: var(--r-panel);
+      padding: 10px 12px;
+    }
+    .panel-label {
+      font-size: 10px; color: var(--text-label);
+      letter-spacing: 0.06em; text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    /* bottom-left: finger guide */
+    #finger-guide {
+      min-width: 128px;
+      display: flex; flex-direction: column;
+      align-items: center;
+    }
+    .finger-legend {
+      display: flex; gap: 8px;
+      flex-wrap: wrap; justify-content: center;
+      margin-top: 4px;
+    }
+    .fl-item {
+      display: flex; align-items: center; gap: 3px;
+      font-size: 10px; color: var(--text-dim);
+    }
+    .fl-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* bottom-center: waveform panel */
+    #waveform-panel { flex: 1; }
+    #waveform-canvas {
+      width: 100%; height: 64px; display: block;
+      border-radius: 3px;
+    }
+    .wave-legend {
+      display: flex; gap: 14px; margin-top: 6px;
+    }
+    .wave-legend-item {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; color: var(--text-dim);
+    }
+    .wave-legend-line { width: 20px; height: 2px; border-radius: 1px; }
+
+    /* diff bars (from erhu_note_comparison_panel.html) */
+    .diff-bar-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 5px;
+    }
+    .diff-label { font-size: 11px; color: var(--text-dim); width: 52px; flex-shrink: 0; }
+    .diff-track {
+      flex: 1; height: 6px;
+      background: rgba(255,255,255,0.10);
+      border-radius: 3px; overflow: hidden;
+    }
+    .diff-fill {
+      height: 100%; border-radius: 3px;
+      transition: width 0.3s ease, background 0.3s ease;
+    }
+    .diff-val {
+      font-size: 11px; color: var(--text-dim);
+      width: 44px; text-align: right; flex-shrink: 0;
+    }
+
+    /* bottom-right: motivator box */
+    #motivator-box { min-width: 120px; text-align: center; }
+    .streak-count  { font-size: 30px; font-weight: 500; color: var(--teal); line-height: 1; }
+    .streak-label  { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+    .motivator-msg { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.4; }
+
+    /* ---- FEEDBACK BAR — bottom strip, exactly one message ---- */
+    #feedback-bar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      height: 40px;
+      background: rgba(0,0,0,0.62);
+      border-top: 0.5px solid rgba(255,255,255,0.07);
+      display: flex; align-items: center;
+      padding: 0 16px; gap: 10px;
+      z-index: 10;
+    }
+    #feedback-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim); flex-shrink: 0;
+    }
+    #feedback-text { font-size: 12px; color: var(--text); }
+
+    /* Play reference tone button (from erhu_note_comparison_panel.html .play-btn) */
+    .play-ref-btn {
+      margin-top: 8px;
+      width: 100%;
+      background: rgba(255,255,255,0.08);
+      border: 0.5px solid rgba(255,255,255,0.18);
+      border-radius: 5px;
+      color: var(--text-dim);
+      font-size: 11px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-family: var(--font);
+      transition: background 0.15s, color 0.15s;
+      text-align: center;
+    }
+    .play-ref-btn:hover  { background: rgba(255,255,255,0.14); color: var(--text); }
+    .play-ref-btn:active { background: rgba(255,255,255,0.20); }
+
+    /* ---- SUMMARY SCREEN — shown at session end (M10) ---- */
+    #summary-screen {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 210; padding: 32px;
+    }
+    .summary-inner {
+      max-width: 360px; text-align: center;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .summary-inner h2 { font-size: 18px; font-weight: 500; color: var(--teal); }
+    .summary-score    { font-size: 64px; font-weight: 500; color: var(--text); line-height: 1; }
+    .summary-sub      { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+    #btn-practice-again {
+      background: var(--teal); color: #111;
+      border: none; border-radius: 7px;
+      padding: 10px 24px; font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: var(--font);
+    }
+    #btn-recalibrate {
+      background: transparent; color: var(--text-dim);
+      border: 0.5px solid rgba(255,255,255,0.18); border-radius: 7px;
+      padding: 8px 20px; font-size: 12px;
+      cursor: pointer; font-family: var(--font);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    #btn-recalibrate:hover { color: var(--text); border-color: rgba(255,255,255,0.35); }
+
+    /* ---- ERROR OVERLAY — blocking failures (M10) ---- */
+    #error-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; padding: 32px;
+    }
+    .error-inner {
+      max-width: 360px; text-align: center;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .error-inner h2 { font-size: 18px; font-weight: 500; color: var(--red); }
+    .error-inner p  { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+    #btn-retry {
+      background: var(--amber); color: #111;
+      border: none; border-radius: 7px;
+      padding: 10px 24px; font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: var(--font);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ================================================================
+     START SCREEN
+     Camera and mic are NOT requested here.
+     This only loads notes.json and transitions to calibration.
+================================================================ -->
+<div id="start-screen">
+  <div class="start-inner">
+    <h1>Intona</h1>
+    <p class="subtitle">Real-time erhu practice coach</p>
+
+    <div class="permission-note">
+      <strong>Requires Chrome</strong> — Safari and Firefox lack the
+      WebAssembly + WebGL features used for pose detection.<br><br>
+      Chrome will ask for <strong>camera</strong> and
+      <strong>microphone</strong> access when you click Start.
+      Both are required. Nothing is recorded or sent anywhere —
+      all processing runs locally in your browser.
+    </div>
+
+    <button id="btn-start">Start Practice</button>
+  </div>
+</div>
+
+
+<!-- ================================================================
+     CALIBRATION SCREEN
+     Shown after permissions granted.
+     Measures mic environment and sets pitch tolerance threshold.
+     Logic implemented in Milestone 5.
+================================================================ -->
+<div id="calibration-screen" hidden>
+  <div class="calib-inner">
+    <h2>Calibrate</h2>
+    <p>
+      Play the open D string and hold it steady for 3 seconds.<br>
+      This sets the pitch tolerance for your microphone and room.
+    </p>
+    <div class="calib-note-display">D4</div>
+    <div class="calib-ring" id="calib-ring"></div>
+    <!-- Phase-2 progress bar: fills as D4 samples accumulate -->
+    <div id="calib-progress"><div id="calib-progress-fill"></div></div>
+    <div class="calib-status" id="calib-status">Waiting for signal…</div>
+    <button id="btn-skip-calib">Skip — use defaults</button>
+  </div>
+</div>
+
+
+<!-- ================================================================
+     BLOCKING ERROR OVERLAY
+     For: camera denied, mic denied, MediaPipe load failure.
+     Hidden by default. Shown by QA.block().
+     Full wiring in Milestone 10.
+================================================================ -->
+<div id="error-overlay" hidden>
+  <div class="error-inner">
+    <h2 id="error-title">Something went wrong</h2>
+    <p id="error-body">—</p>
+    <button id="btn-retry">Try Again</button>
+  </div>
+</div>
+
+<!-- ================================================================
+     SESSION SUMMARY OVERLAY — shown by UIRenderer.showSummary() (M10)
+     Displays overall score, clean-rep streak, and a restart button.
+================================================================ -->
+<div id="summary-screen" hidden>
+  <div class="summary-inner">
+    <h2>Session complete</h2>
+    <div class="summary-score" id="summary-score-val">—</div>
+    <div class="summary-sub"  id="summary-sub">—</div>
+    <button id="btn-practice-again">Practice Again</button>
+    <!-- M20: lightweight recalibration offer — useful when room or erhu changes -->
+    <button id="btn-recalibrate">Recalibrate Mic</button>
+  </div>
+</div>
+
+
+<!-- ================================================================
+     MAIN APP
+     Zone layout matches erhu_ui_zones.svg exactly:
+       top-left    → note badge (current note + next note)
+       top-center  → session phase banner
+       top-right   → session score + skill track mini-bars
+       center      → camera feed + skeleton canvas
+       bottom-left → finger guide (neck diagram)
+       bottom-center → waveform panel (ref vs live + diff bars)
+       bottom-right  → motivator box (streak + message)
+       bottom bar  → one feedback message
+================================================================ -->
+<div id="app" hidden>
+
+  <!-- Camera feed — background layer -->
+  <video id="camera-feed" autoplay playsinline muted></video>
+
+  <!-- Skeleton canvas overlay — drawn by CVPipeline (M6) -->
+  <canvas id="skeleton-canvas"></canvas>
+
+
+  <!-- TOP OVERLAY -->
+  <div id="overlay-top">
+
+    <!-- Zone: top-left — current note + live indicator -->
+    <div>
+      <div class="live-indicator">
+        <span class="live-dot"></span>
+        <span>live</span>
+      </div>
+      <div id="note-badge">
+        <div class="note-name" id="current-note-name">—</div>
+        <div class="note-sub"  id="next-note-name">next: —</div>
+        <!-- M13: live pitch error bar — centre = in-tune; fills left (flat) / right (sharp) -->
+        <div id="cents-bar">
+          <div id="cents-center-tick"></div>
+          <div id="cents-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Zone: top-center — session phase + BPM -->
+    <div id="top-center">
+      <div id="phase-banner">—</div>
+      <!-- M17: session progress — drill N/M within current phase -->
+      <div id="session-progress-wrap">
+        <div id="session-progress-bar">
+          <div id="session-progress-fill"></div>
+        </div>
+        <div id="session-progress-label"></div>
+      </div>
+      <div id="bpm-badge">
+        <div class="bpm-val"   id="bpm-val">♩ 50</div>
+        <div class="bpm-label">bpm</div>
+        <div class="fps-label" id="fps-val"></div>
+      </div>
+    </div>
+
+    <!-- Zone: top-right — session score + 5 skill bars -->
+    <div id="session-badge">
+      <div class="session-score" id="session-score-val">—</div>
+      <div class="session-label">session score</div>
+      <div class="skill-bars">
+        <div class="skill-bar-row">
+          <span class="skill-bar-name">pitch</span>
+          <div class="skill-bar-track">
+            <div class="skill-bar-fill" id="bar-pitch" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="skill-bar-row">
+          <span class="skill-bar-name">bow</span>
+          <div class="skill-bar-track">
+            <div class="skill-bar-fill" id="bar-bow" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="skill-bar-row">
+          <span class="skill-bar-name">rhythm</span>
+          <div class="skill-bar-track">
+            <div class="skill-bar-fill" id="bar-rhythm" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="skill-bar-row">
+          <span class="skill-bar-name">posture</span>
+          <div class="skill-bar-track">
+            <div class="skill-bar-fill" id="bar-posture" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="skill-bar-row">
+          <span class="skill-bar-name">finger</span>
+          <div class="skill-bar-track">
+            <div class="skill-bar-fill" id="bar-finger" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /overlay-top -->
+
+
+  <!-- BOTTOM PANEL -->
+  <div id="overlay-bottom">
+
+    <!-- Zone: bottom-left — finger guide (neck diagram) -->
+    <!-- SVG structure extracted from erhu_note_comparison_panel.html -->
+    <div id="finger-guide" class="panel">
+      <div class="panel-label">Finger Guide</div>
+      <svg id="neck-svg" width="100" height="160" viewBox="0 0 100 160">
+        <!-- Neck body -->
+        <rect x="36" y="8" width="28" height="144" rx="4"
+          fill="rgba(255,255,255,0.07)"
+          stroke="rgba(255,255,255,0.15)" stroke-width="0.5"/>
+        <!-- Fret lines (5 positions) -->
+        <line x1="36" y1="30"  x2="64" y2="30"  stroke="rgba(255,255,255,0.22)" stroke-width="0.5"/>
+        <line x1="36" y1="55"  x2="64" y2="55"  stroke="rgba(255,255,255,0.22)" stroke-width="0.5"/>
+        <line x1="36" y1="80"  x2="64" y2="80"  stroke="rgba(255,255,255,0.22)" stroke-width="0.5"/>
+        <line x1="36" y1="105" x2="64" y2="105" stroke="rgba(255,255,255,0.22)" stroke-width="0.5"/>
+        <line x1="36" y1="130" x2="64" y2="130" stroke="rgba(255,255,255,0.22)" stroke-width="0.5"/>
+        <!-- String lines: D (x=47), A (x=53) -->
+        <line x1="47" y1="8" x2="47" y2="152" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <line x1="53" y1="8" x2="53" y2="152" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <!-- Open label -->
+        <text x="50" y="22" text-anchor="middle" font-size="8"
+          fill="rgba(255,255,255,0.28)" font-family="sans-serif">open</text>
+        <!-- Active finger marker — updated by UIRenderer per note -->
+        <!-- Default: dashed circle at open position -->
+        <circle id="neck-active" cx="47" cy="22" r="7" fill="none"
+          stroke="var(--blue-ref)" stroke-width="1.5" stroke-dasharray="3 2"/>
+        <!-- Next note marker (faint) — updated by UIRenderer -->
+        <circle id="neck-next" cx="47" cy="55" r="5" fill="none"
+          stroke="rgba(255,255,255,0.18)" stroke-width="1" stroke-dasharray="2 2"/>
+        <!-- Note label beside active marker -->
+        <text id="neck-note-label" x="70" y="26" text-anchor="start"
+          font-size="9" fill="rgba(255,255,255,0.45)" font-family="sans-serif">D4</text>
+      </svg>
+      <!-- Color legend for finger numbers -->
+      <div class="finger-legend">
+        <div class="fl-item">
+          <div class="fl-dot" style="background:var(--amber)"></div>1
+        </div>
+        <div class="fl-item">
+          <div class="fl-dot" style="background:var(--purple-f2)"></div>2
+        </div>
+        <div class="fl-item">
+          <div class="fl-dot" style="background:var(--orange-f3)"></div>3
+        </div>
+        <div class="fl-item">
+          <div class="fl-dot" style="border:1.5px dashed var(--blue-ref);background:none"></div>now
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Zone: bottom-center — waveform panel -->
+    <!-- Canvas + diff bars from erhu_note_comparison_panel.html -->
+    <div id="waveform-panel" class="panel">
+      <div class="panel-label">Waveform — reference vs you</div>
+      <canvas id="waveform-canvas" height="64"></canvas>
+      <div class="wave-legend">
+        <div class="wave-legend-item">
+          <div class="wave-legend-line" style="background:var(--blue-ref)"></div>
+          reference
+        </div>
+        <div class="wave-legend-item">
+          <div class="wave-legend-line" style="background:var(--teal)"></div>
+          you (live)
+        </div>
+      </div>
+      <div class="diff-bar-row">
+        <span class="diff-label">Pitch</span>
+        <div class="diff-track">
+          <div class="diff-fill" id="diff-pitch" style="width:0%;background:var(--teal)"></div>
+        </div>
+        <span class="diff-val" id="diff-pitch-val">—</span>
+      </div>
+      <div class="diff-bar-row">
+        <span class="diff-label">Timing</span>
+        <div class="diff-track">
+          <div class="diff-fill" id="diff-timing" style="width:0%;background:var(--teal)"></div>
+        </div>
+        <span class="diff-val" id="diff-timing-val">—</span>
+      </div>
+      <div class="diff-bar-row">
+        <span class="diff-label">Tone</span>
+        <div class="diff-track">
+          <!-- APPROXIMATION: tone score is RMS stability proxy, not spectral analysis -->
+          <div class="diff-fill" id="diff-tone" style="width:0%;background:var(--amber)"></div>
+        </div>
+        <span class="diff-val" id="diff-tone-val">—</span>
+      </div>
+      <!-- Play reference tone — from erhu_note_comparison_panel.html -->
+      <button id="btn-play-ref" class="play-ref-btn">▶ hear reference note</button>
+    </div>
+
+
+    <!-- Zone: bottom-right — motivator / streak -->
+    <div id="motivator-box" class="panel">
+      <div class="panel-label">Streak</div>
+      <div class="streak-count"  id="streak-count">0</div>
+      <div class="streak-label">in a row</div>
+      <div class="motivator-msg" id="motivator-msg"></div>
+    </div>
+
+  </div><!-- /overlay-bottom -->
+
+
+  <!-- FEEDBACK BAR — exactly one message at a time -->
+  <div id="feedback-bar">
+    <div id="feedback-dot"></div>
+    <span id="feedback-text">—</span>
+  </div>
+
+</div><!-- /app -->
+
+
+<script>
+/* ================================================================
+   MODULE 0 — CONSTANTS + CONFIG
+   NOTES / SESSION_TEMPLATE / MESSAGES populated from notes.json.
+   CONFIG contains all tunable parameters — do not bury these in
+   logic. They will need empirical tuning during M8 testing.
+================================================================ */
+let NOTES            = null;  // Array of note objects
+let SESSION_TEMPLATE = null;  // Array of phase objects
+let MESSAGES         = null;  // Coaching message strings
+let NOTES_BY_ID      = {};    // id → note object, built after load
+
+const CONFIG = {
+  // --- Drill timing ---
+  minRepDurationMs:    1500,  // minimum ms before a rep attempt is evaluated
+  feedbackHoldMs:      2000,  // ms to hold a correction before allowing a new one
+  silenceThresholdMs:  500,   // ms of silence before ending an attempt
+  windowMs:            200,   // slow-loop evaluation window (ms)
+
+  // --- Scoring thresholds ---
+  cleanRepThreshold:   72,    // window score >= this counts as a clean rep
+  struggleThreshold:   45,    // window score <= this counts as struggling
+  poorWindowsToChange: 3,     // consecutive poor windows before difficulty drops
+  cleanWindowsToChange:3,     // consecutive clean windows before difficulty rises
+  praiseMinIntervalMs: 8000,  // minimum ms between any praise message
+
+  // --- Pitch ---
+  defaultToleranceCents: 30,  // used when calibration is skipped
+  minToleranceCents:     15,  // never tighten below this
+  maxToleranceCents:     50,  // never widen beyond this (noisy mic)
+  pitchClarityGate:      0.90, // Pitchy clarity threshold for valid pitch
+  pitchBufferSize:       8,   // frames in median filter (~133ms at 60fps)
+  slightlyOffCents:      20,  // < this = in tune; 20–50 = slightly off; > 50 = wrong note
+
+  // --- Adaptive difficulty ---
+  bpmStep:   5,
+  bpmMin:    40,
+  bpmMax:    120,
+  bpmStart:  50,
+};
+
+/* ================================================================
+   MODULE 1 — APP STATE
+   Single source of truth. Written by pipelines, read by renderer.
+   No module writes directly to the DOM — all DOM writes go through
+   UIRenderer.updateOverlays().
+================================================================ */
+const AppState = {
+
+  // Lifecycle: 'idle' | 'calibrating' | 'session' | 'summary'
+  lifecycle: 'idle',
+
+  // --- Calibration ---
+  calib: {
+    // medianHz removed — was never written; calibration stores noiseFloor + toleranceCents only
+    noiseFloor:     0,     // RMS baseline (ambient noise)
+    variance:       0,     // Hz jitter measured during calibration
+    toleranceCents: CONFIG.defaultToleranceCents,  // derived from calibration
+    sessionCount:   0,     // from localStorage; drives tolerance tightening
+  },
+
+  // --- Session ---
+  session: {
+    phase:      'idle',  // 'warmup' | 'drill' | 'scale' | 'performance'
+    phaseIndex: 0,       // index into SESSION_TEMPLATE
+    drillIndex: 0,       // index into current phase's drill array
+  },
+
+  // --- 5 Independent Skill Tracks ---
+  skillTracks: {
+    // level field removed — was never read; AdaptiveDifficulty uses bpm + noteRangeEnd
+    pitch:   { score: null, history: [] },
+    bow:     { score: null, history: [] },
+    rhythm:  { score: null, history: [] },
+    posture: { score: null, history: [] },
+    finger:  { score: null, history: [] },
+  },
+
+  // --- Adaptive Difficulty ---
+  difficulty: {
+    bpm:              CONFIG.bpmStart,
+    noteRangeEnd:     2,    // index into NOTES array (starts D4, E4 only)
+    focusSkill:       null, // null = coach all; string = coach one skill only
+    // level field removed — was never read; difficulty expressed via bpm + noteRangeEnd
+    poorWindowCount:  0,    // consecutive poor windows → change down
+    cleanWindowCount: 0,    // consecutive clean windows → change up
+  },
+
+  // --- Current Drill ---
+  drill: {
+    state:            'WAITING',
+    // 'WAITING' | 'ATTEMPT' | 'ANALYZING' | 'FEEDBACK_HOLD' | 'ADVANCING'
+    type:             null,   // 'hold' | 'transition' | 'scale' | 'sequence'
+    noteId:           null,
+    secondNoteId:     null,   // used by transition drills
+    repCount:         0,
+    cleanReps:        0,
+    requiredCleanReps: 3,
+    attemptStartTime:  0,
+    lastAttackLatencyMs: null, // ms latency of the attack onset for the current rep; survives into FEEDBACK_HOLD
+    // minRepDuration removed — DrillEngine reads CONFIG.minRepDurationMs directly
+    // sameCorrection removed — escalation replaced by inline skill-walk in FeedbackSelector
+    lastWindowScore:   null,  // for improvement trend detection
+    feedbackHoldUntil: 0,     // timestamp — no new corrections until this passes
+  },
+
+  // --- Note Scheduler ---
+  scheduler: {
+    currentNoteId: null,
+    currentNote:   null,  // full note object
+    nextNote:      null,
+    noteStartTime: 0,
+    // beatInterval removed — NoteScheduler tracks its own _beatInterval; this was dead
+    beatCount:             0,  // M11: increments on every _setNote() call; used by FeedbackSelector
+    stableFramesThisBeat:  0,  // M19: frames where pitchStable=true in current beat window
+    prevBeatStableFrames:  0,  // M21: stableFramesThisBeat for the beat that just ended
+  },
+
+  // --- Current Frame (written by fast loop ~30fps) ---
+  frame: {
+    // CV (written by CVPipeline, M6)
+    poseConfidence:  0,
+    handConfidence:  0,
+    bowAngle:        null,  // degrees; null if not computable
+    postureScore:    null,  // APPROXIMATION: 2D shoulder/hip proxy
+    fingerScore:     null,  // APPROXIMATION: relative landmark positions
+    // Audio (written by AudioPipeline, M5)
+    detectedHz:      null,  // smoothed pitch; null if no clear signal
+    notePhase:       'silent', // 'attack' | 'sustain' | 'silent'
+    pitchStable:       false,
+    centsError:        null,
+    toneScore:         null,  // APPROXIMATION: RMS stability proxy
+    rms:               0,
+    timeDomainData:    null,  // Float32Array from AnalyserNode — read by waveform renderer (M5)
+    attackLatencyMs:   null,  // ms between note display and detected attack; null outside attack phase
+  },
+
+  // Ring buffer: last 60 frames (~2s at 30fps)
+  frameHistory:      [],
+  FRAME_HISTORY_SIZE: 60,
+
+  // --- Motivator ---
+  motivator: {
+    streak:        0,
+    message:       '',
+    lastPraiseTime: 0,  // timestamp — min 8s between praise
+    celebrating:   false,
+  },
+
+  // --- Feedback ---
+  feedback: {
+    message:    '',
+    color:      'var(--text-dim)',
+    mistakeStreak: { pitch: 0, bow: 0, rhythm: 0, posture: 0, finger: 0 },
+  },
+
+  // --- Runtime Status ---
+  status: {
+    cameraOk:     false,
+    micOk:        false,
+    mediapipeOk:  false,
+    fps:          0,
+    // lastFrameTs removed — was never written; FPS tracked via _fpsFrameCount/_fpsWindowStart
+  },
+};
+
+
+/* ================================================================
+   MODULE 2 — CAMERA + MIC PERMISSION FLOW
+   Implemented in Milestone 2.
+   Stubs only here.
+================================================================ */
+async function initCamera() {
+  // Guard: file:// won't have mediaDevices — common mistake
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    QA.block('Camera unavailable — open http://localhost:8000 in Chrome, not file://');
+    throw new Error('getUserMedia unavailable');
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width:  { ideal: 1280 },
+        height: { ideal: 720  },
+      },
+    });
+    CVPipeline.stream        = stream;
+    AppState.status.cameraOk = true;
+
+  } catch (err) {
+    AppState.status.cameraOk = false;
+
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      QA.block('PERM_CAMERA_DENIED');
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      QA.block('No camera found — connect a webcam and try again');
+    } else if (err.name === 'NotReadableError') {
+      QA.block('Camera is in use by another app — close it and try again');
+    } else {
+      QA.block(`Camera error: ${err.message}`);
+    }
+
+    throw err; // halt startup — camera is required
+  }
+}
+
+async function initMic() {
+  // Guard: same check as camera — covers file:// case
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    QA.warn('PERM_MIC_DENIED');
+    return; // non-blocking — app continues with CV only
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,  // do not process the pitch signal
+        noiseSuppression: false,  // raw signal needed for accurate pitch
+        autoGainControl:  false,  // stable amplitude for RMS computation
+        channelCount:     1,
+        sampleRate:       44100,
+      },
+    });
+    AudioPipeline.micStream  = stream;
+    AppState.status.micOk    = true;
+
+    // AudioContext must be created inside (or chained from) a user gesture.
+    // Create it now while we're still in the click handler call stack.
+    // It will be used by AudioPipeline.init() in M5.
+    AudioPipeline.audioCtx = new AudioContext({ sampleRate: 44100 });
+
+    // Chrome may start the context suspended even here — resume immediately.
+    if (AudioPipeline.audioCtx.state === 'suspended') {
+      await AudioPipeline.audioCtx.resume();
+    }
+
+  } catch (err) {
+    AppState.status.micOk = false;
+
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      QA.warn('PERM_MIC_DENIED');
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      QA.warn('No microphone found — pitch detection unavailable');
+    } else {
+      QA.warn(`Mic error: ${err.message}`);
+    }
+    // Do NOT throw — session runs with CV only, pitch track shows —
+  }
+}
+
+
+// ---- CV math utilities --------------------------------------------------
+
+// Angle at vertex b formed by a→b→c, in degrees (2D; uses .x/.y).
+// APPROXIMATION: ignores z — erhu posture is mostly a 2D frontal assessment.
+function _angleDeg(a, b, c) {
+  const v1x = a.x - b.x, v1y = a.y - b.y;
+  const v2x = c.x - b.x, v2y = c.y - b.y;
+  const dot  = v1x * v2x + v1y * v2y;
+  const mag  = Math.sqrt((v1x * v1x + v1y * v1y) * (v2x * v2x + v2y * v2y));
+  if (!mag) return null;
+  return Math.acos(Math.max(-1, Math.min(1, dot / mag))) * (180 / Math.PI);
+}
+
+// -------------------------------------------------------------------------
+
+/* ================================================================
+   MODULE 3 — MEDIAPIPE CV PIPELINE
+   Implemented in Milestone 6.
+================================================================ */
+const CVPipeline = {
+  poseLandmarker:  null,
+  handLandmarker:  null,
+  stream:          null,   // MediaStream from initCamera(), assigned in M2
+  _lastHandResult: null,   // retained across frames in case hand step is skipped
+
+  async init() {
+    // vision_bundle.mjs is the only correct URL — vision_bundle.js does not exist on the CDN.
+    // WASM path must be the same pinned version as the JS bundle.
+    const VISION_CDN  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+    const WASM_PATH   = `${VISION_CDN}/wasm`;
+    const POSE_MODEL  = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+    const HAND_MODEL  = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+    try {
+      // Dynamic import — mirrors how Pitchy is loaded.
+      // Must use .mjs extension; .js returns 404 on every version of this package.
+      const { FilesetResolver, PoseLandmarker, HandLandmarker } =
+        await import(`${VISION_CDN}/vision_bundle.mjs`);
+
+      const vision = await FilesetResolver.forVisionTasks(WASM_PATH);
+
+      this.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: POSE_MODEL,
+          delegate: 'GPU',
+        },
+        runningMode:                    'VIDEO',
+        numPoses:                       1,
+        minPoseDetectionConfidence:     0.5,
+        minPosePresenceConfidence:      0.5,
+        minTrackingConfidence:          0.5,
+        outputSegmentationMasks:        false,
+      });
+
+      this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: HAND_MODEL,
+          delegate: 'GPU',
+        },
+        runningMode:                    'VIDEO',
+        numHands:                       2,
+        minHandDetectionConfidence:     0.5,
+        minHandPresenceConfidence:      0.5,
+        minTrackingConfidence:          0.5,
+      });
+
+      AppState.status.mediapipeOk = true;
+
+    } catch (err) {
+      // CV failure is non-blocking — session continues without posture/finger feedback.
+      // Pitch coaching (audio-only) is unaffected.
+      AppState.status.mediapipeOk = false;
+      QA.warn('MEDIAPIPE_LOAD_FAILED',
+        'Pose detection unavailable — posture & finger feedback disabled. ' +
+        'Check internet connection or reload in Chrome.');
+      // Do NOT QA.block() — let the session run with audio-only coaching.
+    }
+  },
+
+  detectForVideo(videoEl, timestamp) {
+    if (!this.poseLandmarker)        return;
+    if (videoEl.readyState < 2)      return;  // not enough video data yet
+
+    const t0         = performance.now();
+    const poseResult = this.poseLandmarker.detectForVideo(videoEl, timestamp);
+    const poseMs     = performance.now() - t0;
+
+    if (poseResult.landmarks && poseResult.landmarks.length > 0) {
+      const lm = poseResult.landmarks[0];
+
+      // poseConfidence = mean visibility of key upper-body landmarks
+      const keyIdx = [11, 12, 13, 14, 15, 16];
+      AppState.frame.poseConfidence =
+        keyIdx.reduce((s, i) => s + (lm[i]?.visibility || 0), 0) / keyIdx.length;
+
+      this._computePoseMetrics(lm);
+    } else {
+      AppState.frame.poseConfidence = 0;
+      AppState.frame.bowAngle       = null;
+      AppState.frame.postureScore   = null;
+    }
+
+    // Gate: skip hand detection if pose step took > 40ms (frame budget protection)
+    // Gate: skip if pose confidence too low — hands likely aren't reliable either
+    if (poseMs < 40 && this.handLandmarker &&
+        AppState.frame.poseConfidence >= 0.6) {
+      const handResult     = this.handLandmarker.detectForVideo(videoEl, timestamp);
+      this._lastHandResult = handResult;
+
+      if (handResult.landmarks && handResult.landmarks.length > 0) {
+        const keyVis = handResult.landmarks[0].map(p => p.visibility ?? 1);
+        AppState.frame.handConfidence =
+          keyVis.reduce((a, b) => a + b, 0) / keyVis.length;
+        this._computeFingerScore(handResult);
+      } else {
+        AppState.frame.handConfidence = 0;
+        AppState.frame.fingerScore    = null;
+        this._lastHandResult          = null;
+      }
+    }
+
+    // Render immediately — drawSkeleton reads result objects directly
+    UIRenderer.drawSkeleton(poseResult, this._lastHandResult);
+  },
+
+  _computePoseMetrics(lm) {
+    // Indices: 11=L-shoulder, 12=R-shoulder, 13=L-elbow, 14=R-elbow,
+    //          15=L-wrist,    16=R-wrist,    23=L-hip,   24=R-hip
+    // Erhu: right hand = bow arm, left hand = finger arm
+
+    // Bow angle: elbow angle of the right (bow) arm
+    // APPROXIMATION: 2D normalised coords; ignores depth
+    const rs = lm[12], re = lm[14], rw = lm[16];
+    if (rs && re && rw &&
+        (rs.visibility || 0) > 0.5 &&
+        (re.visibility || 0) > 0.5 &&
+        (rw.visibility || 0) > 0.5) {
+      AppState.frame.bowAngle = _angleDeg(rs, re, rw);
+    } else {
+      AppState.frame.bowAngle = null;
+    }
+
+    // Posture score: penalise shoulder tilt + torso lean
+    // APPROXIMATION: 2D shoulder-hip alignment proxy
+    const ls = lm[11], lh = lm[23], rh = lm[24];
+    if (ls && rs && lh && rh &&
+        (ls.visibility || 0) > 0.5 &&
+        (rs.visibility || 0) > 0.5) {
+      const shoulderTilt = Math.abs(ls.y - rs.y);           // 0 = perfectly level
+      const spineLean    = Math.abs(
+        ((ls.x + rs.x) / 2) - ((lh.x + rh.x) / 2)         // shoulder midX vs hip midX
+      );
+      const score = Math.round(
+        100 - Math.min(shoulderTilt * 400, 50)
+            - Math.min(spineLean  * 200, 50)
+      );
+      AppState.frame.postureScore = Math.max(0, score);
+    } else {
+      AppState.frame.postureScore = null;
+    }
+  },
+
+  _computeFingerScore(handResult) {
+    // APPROXIMATION: distinguishes open strings (fingerIndex=0) from fingered
+    // notes, but cannot verify exact fret position without neck calibration
+    // (knowing where the erhu neck appears in the camera frame).
+    // Future improvement: derive neck bounding box from pose landmarks 11/12
+    // and map hand Y-coordinate to fret position.
+    const note        = AppState.scheduler.currentNote;
+    const handPresent = !!(handResult.landmarks && handResult.landmarks.length);
+
+    if (!note) {
+      AppState.frame.fingerScore = handPresent ? 70 : null;
+      return;
+    }
+
+    if (note.fingerIndex === 0) {
+      // Open string: no fingering required.
+      // Hand may be present as part of the bow grip — not penalised.
+      AppState.frame.fingerScore = 85;
+    } else {
+      // Fingered note: left hand should be making contact with the neck.
+      // Only penalise absence when the upper body IS visible (poseConfidence ≥ 0.6);
+      // if pose detection is weak, hand detection is unreliable — stay neutral.
+      // APPROXIMATION: 0.6 threshold is heuristic; MediaPipe lite model varies.
+      if (handPresent) {
+        AppState.frame.fingerScore = 75;
+      } else if (AppState.frame.poseConfidence >= 0.6) {
+        AppState.frame.fingerScore = 35;  // body visible but no hand — likely not fingering
+      } else {
+        AppState.frame.fingerScore = null;  // can't tell — don't score
+      }
+    }
+  },
+};
+
+
+// ---- Audio math utilities -----------------------------------------------
+// Used by AudioPipeline.tick() and Calibration.run(). Pure functions.
+
+function _computeRMS(buf) {
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
+}
+
+function _median(arr) {
+  // arr is a pre-sliced copy — safe to sort in place
+  arr.sort((a, b) => a - b);
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
+// APPROXIMATION: standard cent formula; accurate within a few octaves of target
+function _hzToCents(hz, target) {
+  if (!hz || !target) return 0;
+  return 1200 * Math.log2(hz / target);
+}
+
+function _pitchVariance(arr) {
+  if (arr.length < 2) return 0;
+  const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+  return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+}
+
+// -------------------------------------------------------------------------
+
+/* ================================================================
+   MODULE 4 — AUDIO DSP PIPELINE
+   Implemented in Milestone 5.
+================================================================ */
+const AudioPipeline = {
+  audioCtx:    null,   // created in initMic() inside user gesture
+  analyser:    null,
+  buffer:      null,   // Float32Array(2048) — filled by getFloatTimeDomainData
+  micStream:   null,   // MediaStream from initMic(), assigned in M2
+  pitchBuffer: [],     // rolling buffer for median filter (CONFIG.pitchBufferSize frames)
+  _detector:   null,   // Pitchy PitchDetector instance
+  _rmsHistory: [],     // last 10 RMS values — used for tone score + phase detection
+
+  // Called after initMic() has already created audioCtx. Does NOT create a new AudioContext.
+  async init(stream) {
+    if (this.analyser) return;   // already initialised
+    if (!this.audioCtx) return;  // mic was denied — run without audio
+
+    // Pitchy v4 is ESM-only; load via dynamic import
+    const mod      = await import('https://cdn.jsdelivr.net/npm/pitchy@4.0.1/+esm');
+    this._detector = mod.PitchDetector.forFloat32Array(2048);
+
+    this.analyser = this.audioCtx.createAnalyser();
+    this.analyser.fftSize               = 2048;
+    this.analyser.smoothingTimeConstant = 0;  // raw signal — no browser smoothing
+
+    const src = this.audioCtx.createMediaStreamSource(stream);
+    src.connect(this.analyser);
+
+    this.buffer = new Float32Array(2048);
+
+    // Expose the raw buffer so the waveform renderer can draw real data (M5)
+    AppState.frame.timeDomainData = this.buffer;
+
+    // M12: Resume the context when the user returns to the tab.
+    // Registered here (inside init) so it is wired exactly once, even if
+    // enterApp() is called again on "Practice Again".
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.audioCtx?.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      }
+    });
+  },
+
+  tick() {
+    if (!this.analyser || !this._detector) return;
+
+    // M12: AudioContext can be suspended by Chrome on tab switch or inactivity.
+    // resume() is async but fire-and-forget is fine here — we just skip this
+    // frame rather than process a buffer of stale zeros.
+    if (this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {});
+      return;
+    }
+
+    this.analyser.getFloatTimeDomainData(this.buffer);
+
+    const rms = _computeRMS(this.buffer);
+    this._rmsHistory.push(rms);
+    if (this._rmsHistory.length > 10) this._rmsHistory.shift();
+    AppState.frame.rms = rms;
+
+    // Silence gate — use calibrated noise floor if available.
+    // Minimum gate 0.012 prevents the pitch detector running on room noise
+    // when calibration is skipped (noiseFloor=0) in a loud environment.
+    // APPROXIMATION: 0.012 is heuristic; laptop mics vary significantly.
+    const silenceFloor = Math.max((AppState.calib.noiseFloor || 0) * 2 + 0.005, 0.012);
+    if (rms < silenceFloor) {
+      AppState.frame.detectedHz = null;
+      AppState.frame.notePhase  = 'silent';
+      return;
+    }
+
+    const sampleRate    = this.audioCtx.sampleRate;
+    const [hz, clarity] = this._detector.findPitch(this.buffer, sampleRate);
+
+    // Clarity gate — reject uncertain detections (< 0.90 = likely noise or transient)
+    if (clarity < CONFIG.pitchClarityGate) {
+      AppState.frame.detectedHz = null;
+      AppState.frame.notePhase  = 'attack';
+      return;
+    }
+
+    // Median filter over rolling pitch buffer — suppresses single-frame spikes
+    this.pitchBuffer.push(hz);
+    if (this.pitchBuffer.length > CONFIG.pitchBufferSize) this.pitchBuffer.shift();
+    const smoothedHz = _median(this.pitchBuffer.slice());
+
+    AppState.frame.detectedHz = smoothedHz;
+
+    // Note phase: detect attack via RMS delta vs previous frame
+    // APPROXIMATION: simple RMS delta threshold, not a proper onset detector
+    const prevRms  = this._rmsHistory.length >= 2
+                     ? this._rmsHistory[this._rmsHistory.length - 2] : 0;
+    AppState.frame.notePhase = (rms - prevRms) > 0.015 ? 'attack' : 'sustain';
+  },
+
+  // APPROXIMATION: amplitude stability proxy for tone quality.
+  // Returns variance of recent RMS values — lower = steadier bow = better tone.
+  // Not spectral or harmonic analysis.
+  _computeToneScore() {
+    if (this._rmsHistory.length < 3) return null;
+    return _pitchVariance(this._rmsHistory);
+  },
+};
+
+
+/* ================================================================
+   MODULE 5 — CALIBRATION
+   Implemented in Milestone 5.
+================================================================ */
+const Calibration = {
+  _cancelled: false,
+
+  // Two-phase calibration:
+  //   Phase 1 (500 ms): measure noise floor with silence
+  //   Phase 2 (up to 8 s): collect D4 pitch readings from the user
+  // Caller is responsible for calling enterApp() when the returned promise resolves.
+  // Call skip() to abort and use defaults.
+  async run() {
+    this._cancelled = false;
+
+    const ring   = document.getElementById('calib-ring');
+    const status = document.getElementById('calib-status');
+
+    // ---- Phase 1: noise floor ----------------------------------------
+    status.textContent = 'Measuring background noise…';
+    ring.classList.add('listening');
+
+    const noiseSamples = [];
+    const noiseStart   = performance.now();
+
+    await new Promise(resolve => {
+      const collect = () => {
+        if (this._cancelled)                                        { resolve(); return; }
+        if (performance.now() - noiseStart >= CONFIG.silenceThresholdMs) { resolve(); return; }
+        AudioPipeline.tick();
+        noiseSamples.push(_computeRMS(AudioPipeline.buffer || new Float32Array(2048)));
+        requestAnimationFrame(collect);
+      };
+      requestAnimationFrame(collect);
+    });
+    if (this._cancelled) return;
+
+    AppState.calib.noiseFloor = noiseSamples.length
+      ? noiseSamples.reduce((a, b) => a + b, 0) / noiseSamples.length
+      : 0;
+
+    // ---- Phase 2: collect D4 readings --------------------------------
+    status.textContent = 'Play the open D string and hold steady…';
+
+    const D4_TARGET    = 293.66;  // Hz
+    const d4Samples    = [];
+    const d4Start      = performance.now();
+    const timeoutMs    = 8000;
+    const progressFill = document.getElementById('calib-progress-fill');
+    if (progressFill) progressFill.style.width = '0%';
+
+    await new Promise(resolve => {
+      const collect = () => {
+        if (this._cancelled)                               { resolve(); return; }
+        if (performance.now() - d4Start >= timeoutMs)     { resolve(); return; }
+        if (d4Samples.length >= 80)                       { resolve(); return; }  // enough
+
+        AudioPipeline.tick();
+        const hz = AppState.frame.detectedHz;  // null if clarity gate rejected it
+
+        if (hz !== null) {
+          const cents = Math.abs(_hzToCents(hz, D4_TARGET));
+          if (cents < 100) {  // within ~1 semitone of D4
+            d4Samples.push(hz);
+            status.textContent = `Listening… (${d4Samples.length}/80)`;
+            // Update progress bar proportionally
+            if (progressFill) {
+              progressFill.style.width = `${Math.round((d4Samples.length / 80) * 100)}%`;
+            }
+          }
+        }
+        requestAnimationFrame(collect);
+      };
+      requestAnimationFrame(collect);
+    });
+    if (this._cancelled) return;
+
+    ring.classList.remove('listening');
+    if (progressFill) progressFill.style.width = '100%';  // snap to full on done
+    this._finalize(d4Samples, AppState.calib.noiseFloor);
+  },
+
+  // Abort an in-progress run() and apply defaults immediately.
+  skip() {
+    this._cancelled = true;
+    AppState.calib.toleranceCents = CONFIG.defaultToleranceCents;
+    AppState.calib.noiseFloor     = 0;
+    AppState.calib.variance       = 0;
+    const ring = document.getElementById('calib-ring');
+    if (ring) ring.classList.remove('listening');
+  },
+
+  _finalize(d4Samples, noiseFloor) {
+    if (d4Samples.length < 5) {
+      // Insufficient signal — use wide tolerance and warn
+      AppState.calib.toleranceCents = CONFIG.maxToleranceCents;
+      AppState.calib.variance       = 0;
+      QA.warn('Calibration: not enough D4 signal — using wide tolerance');
+      return;
+    }
+    const variance               = _pitchVariance(d4Samples);
+    AppState.calib.variance       = variance;
+    AppState.calib.toleranceCents = this._deriveTolerance(
+      variance, noiseFloor, AppState.calib.sessionCount
+    );
+  },
+
+  _deriveTolerance(variance, noiseFloor, sessionCount) {
+    let t = 30;
+    if (variance > 8)      t += 10;
+    if (noiseFloor > 0.02) t += 10;
+    if (sessionCount < 3)  t += 15;
+    if (sessionCount > 10) t -= Math.min(8, Math.floor((sessionCount - 10) / 2) * 2);
+    return Math.max(CONFIG.minToleranceCents, Math.min(CONFIG.maxToleranceCents, t));
+  },
+};
+
+
+/* ================================================================
+   MODULE 6 — NOTE SCHEDULER
+   Owns the current note display and the per-drill beat clock.
+   SessionEngine tells it which drill to load.
+   In M4: drills advance on a timer (time-based placeholder).
+   In M8: DrillEngine.evaluate() calls advance() instead of the timer.
+================================================================ */
+const NoteScheduler = {
+  _noteList:       [],    // note ids for current drill
+  _noteIndex:      0,     // current position in _noteList
+  _beatInterval:   null,  // setInterval handle for beat clock
+  _advanceTimer:   null,  // setTimeout handle for hold drills
+
+  // Entry point — called from enterApp() → SessionEngine.start()
+  start() {
+    SessionEngine.start();
+  },
+
+  // Load a new drill. Called by SessionEngine._loadDrill().
+  // Resets note list, sets first note, starts appropriate clock.
+  loadDrill(drill) {
+    this.stop();
+    this._noteIndex = 0;
+    this._noteList  = this._buildNoteList(drill);
+
+    if (!this._noteList.length) {
+      // Drill has no valid notes — skip it
+      SessionEngine.advanceDrill();
+      return;
+    }
+
+    this._setNote(0);
+    this._startClock(drill);
+  },
+
+  // Build the ordered note list for a drill, respecting difficulty range.
+  _buildNoteList(drill) {
+    if (drill.type === 'hold') {
+      return drill.noteId ? [drill.noteId] : [];
+    }
+    if (drill.type === 'transition') {
+      return drill.noteIds ? drill.noteIds.slice(0, 2) : [];
+    }
+    if (drill.type === 'scale' || drill.type === 'sequence') {
+      const all     = drill.noteIds || [];
+      const maxEnd  = AppState.difficulty.noteRangeEnd;
+      // Always include at least 2 notes so a scale isn't trivial
+      return all.slice(0, Math.max(2, maxEnd));
+    }
+    return [];
+  },
+
+  // Start the timer/interval that governs note advancement for this drill.
+  // M8 NOTE: hold drills use a timer here as a placeholder.
+  // DrillEngine.advance() will replace the setTimeout call in M8.
+  _startClock(drill) {
+    const msPerNote = drill.durationMs || this._msPerBeat();
+    const bpmMultiplier = drill.bpmMultiplier || 1.0;
+
+    if (drill.type === 'hold') {
+      // DrillEngine.evaluate() owns hold-drill advancement (M8).
+      // DrillEngine transitions WAITING→ATTEMPT→ANALYZING→FEEDBACK_HOLD→ADVANCING,
+      // then calls NoteScheduler.advance() → SessionEngine.advanceDrill().
+      //
+      // Safety fallback only: if DrillEngine never fires (e.g. no audio/CV),
+      // force-advance after 2 minutes so the session doesn't hang forever.
+      this._advanceTimer = setTimeout(() => {
+        QA.warn('Hold drill safety timeout — advancing (check audio/CV pipeline)');
+        SessionEngine.advanceDrill();
+      }, 120000);
+
+    } else if (drill.type === 'transition') {
+      // Alternate between two notes every msPerNote.
+      // Total: requiredCleanReps alternations per note (×2 notes).
+      const repsEach = drill.requiredCleanReps || 3;
+      let   ticks    = 0;
+      const total    = repsEach * this._noteList.length;
+
+      this._beatInterval = setInterval(() => {
+        ticks++;
+        this._noteIndex = ticks % this._noteList.length;
+        this._setNote(this._noteIndex);
+        if (ticks >= total) {
+          clearInterval(this._beatInterval);
+          this._beatInterval = null;
+          SessionEngine.advanceDrill();
+        }
+      }, msPerNote);
+
+    } else if (drill.type === 'scale' || drill.type === 'sequence') {
+      // Advance on each beat. Play through all notes requiredCleanReps times.
+      const beat  = Math.round(this._msPerBeat() / bpmMultiplier);
+      const reps  = drill.requiredCleanReps || 2;
+      let   ticks = 0;
+      const total = this._noteList.length * reps;
+
+      this._beatInterval = setInterval(() => {
+        ticks++;
+        this._noteIndex = ticks % this._noteList.length;
+        this._setNote(this._noteIndex);
+        if (ticks >= total) {
+          clearInterval(this._beatInterval);
+          this._beatInterval = null;
+          SessionEngine.advanceDrill();
+        }
+      }, beat);
+    }
+  },
+
+  // Move to a specific note index, update AppState and UI.
+  _setNote(index) {
+    const noteId = this._noteList[index];
+    if (!noteId) return;
+    const note = NOTES_BY_ID[noteId];
+    if (!note) return;
+
+    AppState.scheduler.currentNoteId = noteId;
+    AppState.scheduler.currentNote   = note;
+    AppState.scheduler.noteStartTime = Date.now();
+    AppState.scheduler.prevBeatStableFrames  = AppState.scheduler.stableFramesThisBeat; // M21: save before reset
+    AppState.scheduler.beatCount++;                // M11: signal to FeedbackSelector
+    AppState.scheduler.stableFramesThisBeat  = 0;  // M19: reset per-beat pitch-stability counter
+
+    // Next note: next in list, null if same (loop back to start = same note)
+    const nextId   = this._noteList[(index + 1) % this._noteList.length];
+    AppState.scheduler.nextNote =
+      (nextId && nextId !== noteId) ? NOTES_BY_ID[nextId] : null;
+
+    // Immediate UI update on note change — don't wait for slow loop
+    UIRenderer.updateOverlays();
+  },
+
+  // Called by DrillEngine (M8) to manually advance a hold drill.
+  advance() {
+    this.stop();
+    SessionEngine.advanceDrill();
+  },
+
+  // Stop all timers. Called before loading a new drill or on session end.
+  stop() {
+    if (this._beatInterval) {
+      clearInterval(this._beatInterval);
+      this._beatInterval = null;
+    }
+    if (this._advanceTimer) {
+      clearTimeout(this._advanceTimer);
+      this._advanceTimer = null;
+    }
+  },
+
+  _msPerBeat() {
+    return Math.round(60000 / AppState.difficulty.bpm);
+  },
+};
+
+
+/* ================================================================
+   MODULE 7 — SCORING ENGINE
+   Implemented in Milestone 7.
+================================================================ */
+const ScoringEngine = {
+
+  // Called from the fast loop every rAF tick (after both audio and CV have run).
+  // Reads AppState.frame, computes raw per-skill scores, writes derived fields
+  // (centsError, pitchStable, toneScore) back onto AppState.frame, then pushes
+  // a timestamped snapshot to AppState.frameHistory.
+  computeFrame() {
+    const F    = AppState.frame;
+    const note = AppState.scheduler.currentNote;
+
+    // ---- Pitch ---------------------------------------------------------
+    // Only meaningful during sustain — attack phase is transient, silence = no note
+    let pitchScore = null;
+    if (F.detectedHz !== null && F.notePhase === 'sustain' && note) {
+      const cents  = _hzToCents(F.detectedHz, note.freq);
+      F.centsError = cents;
+      const t      = AppState.calib.toleranceCents;
+      // Linear decay: 0 cents → 100, ±toleranceCents → 0, beyond → clamped 0
+      pitchScore   = Math.max(0, Math.round(100 - (Math.abs(cents) / t) * 100));
+    } else {
+      F.centsError = null;
+    }
+
+    // pitchStable: held cleanly this frame
+    F.pitchStable = (pitchScore !== null && pitchScore >= 85);
+    // M19: accumulate per-beat stability count (used by FeedbackSelector for transition drills)
+    if (F.pitchStable) AppState.scheduler.stableFramesThisBeat++;
+
+    // Tone quality: RMS stability proxy — lower variance = steadier bow stroke
+    // APPROXIMATION: not spectral; variance scale needs empirical tuning
+    const toneVar = AudioPipeline._computeToneScore();
+    F.toneScore   = (toneVar !== null)
+      ? Math.max(0, Math.min(100, Math.round(100 - toneVar * 15000)))
+      : null;
+
+    // ---- Bow -----------------------------------------------------------
+    // Disabled: the 110° ±40° elbow-angle reference has no empirical basis.
+    // To re-enable: record ≥5 erhu players confirmed to have good bow technique,
+    // measure their elbow angles at full bow stroke and mid stroke, derive a
+    // per-player-height-normalised distribution, then replace this null.
+    // F.bowAngle is still populated by CVPipeline for future display/debug use.
+    const bowScore = null;
+
+    // ---- Rhythm --------------------------------------------------------
+    // APPROXIMATION: uses time between note display (noteStartTime) and
+    // detected attack onset as a latency proxy for beat accuracy.
+    // This is not a true metronome alignment — it measures "did they start
+    // quickly after the note appeared?" rather than "did they start on beat?".
+    // Thresholds (400ms / 800ms) are heuristic; erhu players vary.
+    let rhythmScore = null;
+    F.attackLatencyMs = null;
+    if (AppState.lifecycle === 'session' && note) {
+      if (F.notePhase === 'attack') {
+        const latency = performance.now() - (AppState.scheduler.noteStartTime || 0);
+        F.attackLatencyMs = latency;
+        rhythmScore = latency < 400 ? 90
+                    : latency < 800 ? 68
+                    : 45;
+        // Store scored latency so sustain can carry the penalty forward
+        AppState.scheduler._lastAttackRhythmScore = rhythmScore;
+        // Capture first-frame latency on the drill object so FEEDBACK_HOLD can read it
+        // (attackLatencyMs on the frame is reset to null once sustain begins)
+        if (AppState.drill.lastAttackLatencyMs === null) {
+          AppState.drill.lastAttackLatencyMs = latency;
+        }
+      } else if (F.notePhase === 'sustain') {
+        // Carry the attack latency score into sustain rather than always using 80.
+        // A late onset (score=45) should stay penalised throughout the hold.
+        // Cap at 80 so a perfect attack (90) doesn't inflate sustain.
+        rhythmScore = Math.min(80, AppState.scheduler._lastAttackRhythmScore || 80);
+      }
+      // 'silent' during active note period → rhythmScore stays null
+    }
+
+    // ---- Posture -------------------------------------------------------
+    // Gate on pose confidence: below 0.5 the landmark positions are too
+    // noisy to give reliable posture readings (camera angle errors dominate).
+    // APPROXIMATION: 0.5 threshold is conservative; tune if too many null scores.
+    const postureScore = (F.poseConfidence >= 0.5) ? F.postureScore : null;
+
+    // ---- Finger --------------------------------------------------------
+    // CVPipeline._computeFingerScore() sets this.
+    // M6 value is a presence placeholder (70); M7+ refines with geometry.
+    const fingerScore = F.fingerScore;
+
+    // ---- Push snapshot to ring buffer ----------------------------------
+    AppState.frameHistory.push({
+      ts:      performance.now(),
+      pitch:   pitchScore,
+      bow:     bowScore,
+      rhythm:  rhythmScore,
+      posture: postureScore,
+      finger:  fingerScore,
+    });
+    if (AppState.frameHistory.length > AppState.FRAME_HISTORY_SIZE) {
+      AppState.frameHistory.shift();
+    }
+  },
+
+  // Called from the slow loop (every CONFIG.windowMs = 200 ms).
+  // Averages per-skill scores from frameHistory over the last window
+  // and writes results to AppState.skillTracks[x].score.
+  // Returns null per-skill (not 0) when no valid frames exist in the window.
+  computeWindow() {
+    const now    = performance.now();
+    const cutoff = now - CONFIG.windowMs;
+
+    ['pitch', 'bow', 'rhythm', 'posture', 'finger'].forEach(skill => {
+      const vals = [];
+      // Walk backwards — most recent first, stop at cutoff
+      for (let i = AppState.frameHistory.length - 1; i >= 0; i--) {
+        const s = AppState.frameHistory[i];
+        if (s.ts < cutoff) break;
+        if (s[skill] !== null) vals.push(s[skill]);
+      }
+      AppState.skillTracks[skill].score =
+        vals.length
+          ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+          : null;
+    });
+  },
+};
+
+
+/* ================================================================
+   MODULE 8 — SESSION ENGINE
+   State machine over SESSION_TEMPLATE phases and drills.
+   Owns phase/drill indices in AppState.session.
+   Delegates per-note timing to NoteScheduler.
+   Delegates per-rep scoring gate to DrillEngine (M8).
+================================================================ */
+const SessionEngine = {
+  _phaseData: null,  // current phase object from SESSION_TEMPLATE
+
+  // Entry point. Called from NoteScheduler.start() → enterApp().
+  start() {
+    if (!SESSION_TEMPLATE || !SESSION_TEMPLATE.length) {
+      QA.warn('Session template missing — check notes.json');
+      return;
+    }
+    AppState.session.phaseIndex = 0;
+    AppState.session.drillIndex = 0;
+    this._loadPhase(0);
+  },
+
+  // Load a phase by index. Advances to next phase if index is out of bounds.
+  _loadPhase(phaseIndex) {
+    if (phaseIndex >= SESSION_TEMPLATE.length) {
+      this._onSessionComplete();
+      return;
+    }
+    const phase = SESSION_TEMPLATE[phaseIndex];
+    this._phaseData             = phase;
+    AppState.session.phase      = phase.phase;
+    AppState.session.phaseIndex = phaseIndex;
+    AppState.session.drillIndex = 0;
+
+    // Surface the phase transition in the feedback bar
+    const phaseLabels = {
+      warmup:      'Warm up — no pressure, just get comfortable',
+      drill:       'Drill — focus on each note',
+      scale:       'Scale — play through the sequence',
+      performance: 'Performance — full run through',
+    };
+    AppState.feedback.message = phaseLabels[phase.phase] || phase.label || phase.phase;
+    AppState.feedback.color   = 'var(--teal)';  // teal flash on phase entry; overwritten by first coaching message
+
+    this._loadDrill(0);
+  },
+
+  // Load a drill by index within the current phase.
+  _loadDrill(drillIndex) {
+    if (!this._phaseData || drillIndex >= this._phaseData.drills.length) {
+      // Phase exhausted — move to next
+      this._loadPhase(AppState.session.phaseIndex + 1);
+      return;
+    }
+    const drill = this._phaseData.drills[drillIndex];
+    AppState.session.drillIndex    = drillIndex;
+
+    // Reset drill state
+    AppState.drill.type            = drill.type;
+    AppState.drill.noteId          = drill.noteId || (drill.noteIds && drill.noteIds[0]) || null;
+    AppState.drill.secondNoteId    = (drill.noteIds && drill.noteIds[1]) || null;
+    AppState.drill.requiredCleanReps = drill.requiredCleanReps || 3;
+    AppState.drill.repCount        = 0;
+    AppState.drill.cleanReps            = 0;
+    AppState.drill.state                = 'WAITING';
+    AppState.drill.lastAttackLatencyMs  = null;
+    AppState.drill.lastWindowScore      = null;
+
+    NoteScheduler.loadDrill(drill);
+    UIRenderer.updateOverlays();
+  },
+
+  // Called by NoteScheduler timers (M4) or DrillEngine (M8) when a drill finishes.
+  advanceDrill() {
+    this._loadDrill(AppState.session.drillIndex + 1);
+  },
+
+  // Exposed for AdaptiveDifficulty (M8) to force phase jump.
+  advancePhase() {
+    this._loadPhase(AppState.session.phaseIndex + 1);
+  },
+
+  _onSessionComplete() {
+    NoteScheduler.stop();
+    AppState.session.phase         = 'summary';
+    AppState.scheduler.currentNote = null;
+    AppState.scheduler.nextNote    = null;
+    AppState.feedback.message      = 'Session complete — great work today';
+    AppState.feedback.color        = 'var(--teal)';
+    saveSessionCount();
+    UIRenderer.updateOverlays();
+    UIRenderer.showSummary();   // M10: overlay with score + streak
+  },
+};
+
+/* ================================================================
+   MODULE 8b — DRILL ENGINE
+   Drives the per-rep practice loop for hold drills:
+     WAITING → ATTEMPT → ANALYZING → FEEDBACK_HOLD → WAITING (repeat)
+                                                    ↘ ADVANCING (done)
+   Scale / transition / sequence drills are tempo-driven by NoteScheduler's
+   beat clock and are not managed here.
+================================================================ */
+const DrillEngine = {
+
+  // Called from the slow loop every CONFIG.windowMs (200 ms).
+  evaluate() {
+    if (AppState.lifecycle !== 'session')  return;
+    if (AppState.drill.type   !== 'hold')  return;  // only hold drills here
+
+    const D   = AppState.drill;
+    const now = Date.now();
+
+    switch (D.state) {
+
+      // ---- WAITING: note is shown, waiting for player to begin -----------
+      // Guard: require a detected pitch (not just RMS above silence gate).
+      // notePhase='attack' can fire on room noise when clarity < 0.90; we
+      // must not start a rep on noise alone.
+      case 'WAITING':
+        if ((AppState.frame.notePhase === 'attack' ||
+             AppState.frame.notePhase === 'sustain') &&
+            AppState.frame.detectedHz !== null) {
+          D.state            = 'ATTEMPT';
+          D.attemptStartTime = now;
+        }
+        break;
+
+      // ---- ATTEMPT: player is playing, wait for silence ------------------
+      case 'ATTEMPT':
+        if (AppState.frame.notePhase === 'silent') {
+          const held = now - D.attemptStartTime;
+          if (held >= CONFIG.minRepDurationMs) {
+            // Held long enough — score it
+            D.state = 'ANALYZING';
+          } else {
+            // Too brief (< minRepDurationMs) — ignore, don't penalise
+            D.state = 'WAITING';
+          }
+        }
+        break;
+
+      // ---- ANALYZING: score the rep just completed -----------------------
+      case 'ANALYZING': {
+        // Use the window scores freshly computed by ScoringEngine.computeWindow()
+        // this same slow-loop tick (it runs before DrillEngine).
+        // APPROXIMATION: final 200ms window only; doesn't average full hold duration.
+        const vals = Object.values(AppState.skillTracks)
+          .map(t => t.score).filter(v => v !== null);
+        const windowScore = vals.length
+          ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+          : null;
+
+        D.lastWindowScore   = windowScore;
+        D.repCount++;
+
+        if (windowScore !== null && windowScore >= CONFIG.cleanRepThreshold) {
+          D.cleanReps++;          // must be earned consecutively
+        } else {
+          D.cleanReps = 0;        // any poor rep resets the streak
+        }
+
+        D.state             = 'FEEDBACK_HOLD';
+        D.feedbackHoldUntil = now + CONFIG.feedbackHoldMs;
+        break;
+      }
+
+      // ---- FEEDBACK_HOLD: pause so player can read correction ------------
+      case 'FEEDBACK_HOLD':
+        if (now < D.feedbackHoldUntil) break;  // still waiting
+
+        if (D.cleanReps >= D.requiredCleanReps) {
+          D.state = 'ADVANCING';
+        } else {
+          D.state = 'WAITING';   // loop — try again
+        }
+        break;
+
+      // ---- ADVANCING: earned enough clean reps — move on ----------------
+      case 'ADVANCING':
+        // NoteScheduler.advance() stops the safety timer and calls
+        // SessionEngine.advanceDrill(), which loads the next drill.
+        NoteScheduler.advance();
+        break;
+    }
+  },
+};
+
+
+/* ================================================================
+   MODULE 9 — FEEDBACK SELECTOR
+   Implemented in Milestone 9.
+================================================================ */
+const FeedbackSelector = {
+  _lastHoldTs:      0,    // dedup: fire once per FEEDBACK_HOLD window
+  _lastState:       null, // previous drill.state — used to detect WAITING entry
+  _waitingSince:    0,    // when the current WAITING period started
+  _lastBeatCount:   0,    // M11: last beatCount we coached on (non-hold drills)
+  _silentBeatCount: 0,    // M17: consecutive beats with null pitch (scale/transition)
+
+  // Called from the slow loop every 200 ms.
+  // Writes to AppState.feedback.message/color and AppState.motivator.
+  // Only touches the feedback bar during FEEDBACK_HOLD or after a long WAITING.
+  select() {
+    if (AppState.lifecycle !== 'session') return;
+    if (!MESSAGES)                         return;
+
+    const D   = AppState.drill;
+    const now = Date.now();
+
+    // Track when WAITING was entered so we can detect prolonged silence
+    if (D.state === 'WAITING' && this._lastState !== 'WAITING') {
+      this._waitingSince = now;
+    }
+    this._lastState = D.state;
+
+    // ---- Non-hold drills: beat-aligned coaching (M11) ------------------
+    // Scale / transition / sequence drills advance on a timer clock.
+    // DrillEngine never sets FEEDBACK_HOLD for these, so we coach on each
+    // note change instead.  _lastBeatCount deduplicates: one message per note.
+    // Only pitch is evaluated per-note — posture/bow/rhythm windows are too
+    // coarse to give useful beat-level feedback on fast passages.
+    if (D.type !== 'hold') {
+      // No-signal guard for non-hold drills (M17).
+      // Beat clock advances regardless of whether the student plays, so we
+      // track consecutive silent beats instead of wall-clock seconds.
+      // After 4 consecutive null-pitch beats (scale note slots with no signal),
+      // warn — this suggests mic failure or the student has stopped playing.
+      // APPROXIMATION: 4 beats at 50 bpm ≈ 4.8 s; calibrate threshold if too noisy.
+      const beat = AppState.scheduler.beatCount;
+      if (beat !== this._lastBeatCount) {
+        const pitchNow = AppState.skillTracks.pitch.score;
+        if (pitchNow === null) {
+          this._silentBeatCount = (this._silentBeatCount || 0) + 1;
+        } else {
+          if (this._silentBeatCount >= 4) {
+            // Signal just returned — clear the warning
+            AppState.feedback.message = MESSAGES.pitch.improving || '';
+            AppState.feedback.color   = 'var(--teal)';
+          }
+          this._silentBeatCount = 0;
+        }
+        if (this._silentBeatCount >= 4) {
+          if (!AppState.status.micOk) {
+            AppState.feedback.message = MESSAGES.general.noSignal;
+            AppState.feedback.color   = 'var(--red)';
+          } else {
+            AppState.feedback.message = MESSAGES.general.tooQuiet;
+            AppState.feedback.color   = 'var(--red)';
+          }
+        }
+      }
+      if (beat !== this._lastBeatCount) {
+        this._lastBeatCount = beat;
+        // Skip beat 0 and beat 1 — no previous window to score yet
+        if (beat > 1) {
+          const vals = Object.values(AppState.skillTracks)
+            .map(t => t.score).filter(v => v !== null);
+          const overall = vals.length
+            ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+            : null;
+
+          const canPraise = overall !== null
+            && overall >= 80
+            && (now - AppState.motivator.lastPraiseTime) >= CONFIG.praiseMinIntervalMs;
+
+          if (canPraise) {
+            // Praise: streak-aware, anti-spam already gated above.
+            // Allowed in all phases including warmup.
+            AppState.motivator.streak++;
+            AppState.motivator.lastPraiseTime = now;
+            const praiseMsg = this._praiseMessage(AppState.motivator.streak);
+            AppState.motivator.message = praiseMsg;
+            AppState.feedback.message  = praiseMsg;
+            AppState.feedback.color    = 'var(--teal)';
+            Object.keys(AppState.feedback.mistakeStreak)
+              .forEach(k => { AppState.feedback.mistakeStreak[k] = 0; });
+          } else {
+            // Corrections are suppressed when:
+            //   (a) current phase has scoringPressure=false  (e.g. warmup)
+            //   (b) drill type is 'sequence' — mid-run interruptions break
+            //       the student's focus; the phase-transition message is enough.
+            const correctionsOn = this._coachingEnabled() && D.type !== 'sequence';
+
+            if (correctionsOn) {
+              // M19: transition drills — check pitch stability across the jump.
+              // stableFramesThisBeat counts frames where pitch was locked on to
+              // the *previous* note. At ~60fps and 2000ms beat, 40+ stable frames
+              // (≈ 67%) means the student held the note cleanly.
+              // APPROXIMATION: 40-frame threshold at 60fps; degrades gracefully
+              // at lower frame rates (30fps → 20 frames still distinguishes
+              // a clean hold from a brief touch).
+              if (D.type === 'transition') {
+                // prevBeatStableFrames: how many frames the *previous* note was stable.
+                // Threshold = 60% of measured fps × 2s beat duration.
+                // At 60fps → need 72 frames; at 30fps → need 36.
+                // Falls back to 30fps if FPS hasn't been measured yet.
+                // APPROXIMATION: 0.6 duty-cycle is heuristic.
+                const measuredFps  = AppState.status.fps || 30;
+                const stableNeeded = Math.round(measuredFps * (2000 / 1000) * 0.6);
+                const stableFrames = AppState.scheduler.prevBeatStableFrames;
+                const pitchWindow  = AppState.skillTracks.pitch.score;
+
+                if (stableFrames < stableNeeded || (pitchWindow !== null && pitchWindow < 55)) {
+                  AppState.feedback.mistakeStreak.pitch =
+                    (AppState.feedback.mistakeStreak.pitch || 0) + 1;
+                  AppState.feedback.message  = MESSAGES.pitch.wildlyOff || 'find the note cleanly';
+                  AppState.feedback.color    = 'var(--amber)';
+                  AppState.motivator.streak  = 0;
+                  AppState.motivator.message = '';
+                } else if (pitchWindow !== null && pitchWindow >= CONFIG.cleanRepThreshold) {
+                  AppState.feedback.mistakeStreak.pitch = 0;
+                }
+              } else {
+              // Pitch only for timed drills.
+              // Other skills are too slow/noisy to be actionable note-by-note.
+              const pitchScore = AppState.skillTracks.pitch.score;
+              if (pitchScore !== null && pitchScore < CONFIG.cleanRepThreshold) {
+                AppState.feedback.mistakeStreak.pitch =
+                  (AppState.feedback.mistakeStreak.pitch || 0) + 1;
+                const pitchMsg = this._messageForSkill(
+                  'pitch', AppState.feedback.mistakeStreak.pitch);
+                if (pitchMsg) {
+                  AppState.feedback.message  = pitchMsg;
+                  AppState.feedback.color    = 'var(--amber)';
+                  AppState.motivator.streak  = 0;
+                  AppState.motivator.message = '';
+                }
+              } else if (pitchScore !== null) {
+                // Clean note — reset pitch mistake streak
+                AppState.feedback.mistakeStreak.pitch = 0;
+              }
+              }  // end else (non-transition drills)
+            }
+          }
+        }
+      }
+      return;  // non-hold path ends here — no FEEDBACK_HOLD logic below
+    }
+
+    // ---- No-signal guard (hold drills, WAITING > 10 s) -----------------
+    // Prompts the student if the mic is off or too quiet to pick up.
+    if (D.type === 'hold' && D.state === 'WAITING') {
+      if (now - this._waitingSince > 10000) {
+        if (!AppState.status.micOk) {
+          AppState.feedback.message = MESSAGES.general.noSignal;
+          AppState.feedback.color   = 'var(--red)';
+        } else if (AppState.frame.rms < 0.01) {
+          AppState.feedback.message = MESSAGES.general.tooQuiet;
+          AppState.feedback.color   = 'var(--red)';
+        }
+      }
+      return;  // no coaching while waiting
+    }
+
+    // ---- Coaching only fires during FEEDBACK_HOLD ----------------------
+    if (D.state !== 'FEEDBACK_HOLD') return;
+    // Guard: only pick a message once per hold window (feedbackHoldUntil
+    // changes each rep, so this dedup key changes each rep too)
+    if (this._lastHoldTs === D.feedbackHoldUntil) return;
+    this._lastHoldTs = D.feedbackHoldUntil;
+
+    // ---- Overall score for praise gate ---------------------------------
+    const vals = Object.values(AppState.skillTracks)
+      .map(t => t.score).filter(v => v !== null);
+    const overall = vals.length
+      ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+      : null;
+
+    // ---- Praise --------------------------------------------------------
+    // Conditions: score ≥ 80, at least one clean rep this drill,
+    // minimum 8 s since last praise (anti-spam).
+    const canPraise = overall !== null
+      && overall >= 80
+      && D.cleanReps > 0
+      && (now - AppState.motivator.lastPraiseTime) >= CONFIG.praiseMinIntervalMs;
+
+    if (canPraise) {
+      AppState.motivator.streak++;
+      AppState.motivator.lastPraiseTime = now;
+      const msg = this._praiseMessage(AppState.motivator.streak);
+      AppState.motivator.message = msg;
+      AppState.feedback.message  = msg;
+      AppState.feedback.color    = 'var(--teal)';
+      // Clean slate — wipe mistake streaks when playing well
+      Object.keys(AppState.feedback.mistakeStreak)
+        .forEach(k => { AppState.feedback.mistakeStreak[k] = 0; });
+      return;
+    }
+
+    // ---- Correction (M14: suppressed during warmup / low-pressure phases) -----
+    if (!this._coachingEnabled()) return;
+
+    // Walk priority list: if _messageForSkill returns null (e.g. pitch within
+    // slightlyOffCents quiet band), skip that skill and try the next worst one.
+    // This prevents silent corrections when pitch is close but another skill is bad.
+    const skills  = ['pitch', 'bow', 'rhythm', 'posture', 'finger'];
+    const T       = AppState.skillTracks;
+    let   skill   = null;
+    let   msg     = null;
+    const focus   = AppState.difficulty.focusSkill;
+
+    // Try focus skill first, then priority order
+    const order   = focus ? [focus, ...skills.filter(s => s !== focus)] : skills;
+    for (const s of order) {
+      if (T[s].score === null || T[s].score >= CONFIG.cleanRepThreshold) continue;
+      const candidate = this._messageForSkill(s, AppState.feedback.mistakeStreak[s] + 1);
+      if (candidate) { skill = s; msg = candidate; break; }
+    }
+    if (!skill || !msg) {
+      // All skills are at threshold — no correction needed. Show neutral nudge
+      // so the bar doesn't sit stale from the previous rep's message.
+      AppState.feedback.message = MESSAGES.general.holdFeedback;
+      AppState.feedback.color   = 'var(--text-dim)';
+      return;
+    }
+
+    // Commit the streak increment for the chosen skill
+    AppState.feedback.mistakeStreak[skill]++;
+
+    // One correction at a time — reset streaks for all other skills
+    Object.keys(AppState.feedback.mistakeStreak)
+      .forEach(k => { if (k !== skill) AppState.feedback.mistakeStreak[k] = 0; });
+
+    // A correction resets the clean-rep streak in the motivator
+    AppState.motivator.streak  = 0;
+    AppState.feedback.message  = msg;
+    AppState.feedback.color    = 'var(--amber)';
+  },
+
+  // Returns false when the current session phase has scoringPressure disabled
+  // (e.g. warmup).  Corrections are suppressed; praise is still allowed.
+  _coachingEnabled() {
+    const phase = SESSION_TEMPLATE?.[AppState.session.phaseIndex];
+    return phase ? (phase.scoringPressure !== false) : true;
+  },
+
+  /** @deprecated — replaced by inline skill-walk in the FEEDBACK_HOLD correction block (M16 role review).
+   *  Retained for documentation of priority order. Not called. */
+  _pickSkill() {
+    const focus = AppState.difficulty.focusSkill;
+    const T     = AppState.skillTracks;
+
+    // Locked focus first — only if it has a bad score
+    if (focus && T[focus] && T[focus].score !== null
+        && T[focus].score < CONFIG.cleanRepThreshold) {
+      return focus;
+    }
+    // Priority order: pitch matters most for musical accuracy
+    for (const s of ['pitch', 'bow', 'rhythm', 'posture', 'finger']) {
+      if (T[s].score !== null && T[s].score < CONFIG.cleanRepThreshold) return s;
+    }
+    return null;
+  },
+
+  // Map skill + escalation streak to a concrete message from MESSAGES.
+  _messageForSkill(skill, streak) {
+    const m = MESSAGES[skill];
+    if (!m) return null;
+
+    if (skill === 'pitch') {
+      const cents = AppState.frame.centsError;
+      const t     = AppState.calib.toleranceCents;
+      // CONFIG.slightlyOffCents (20) = boundary between directional and "find the note" guidance.
+      // Beyond 2× tolerance = wrong note territory; streak ≥ 3 = aim is unstable.
+      if (cents === null)                           return m.unstable;
+      if (Math.abs(cents) > t * 2)                 return m.wildlyOff;
+      if (streak >= 3)                             return m.unstable;
+      if (Math.abs(cents) <= CONFIG.slightlyOffCents) return null;  // close enough — stay quiet
+      return cents > 0 ? m.slightlySharp : m.slightlyFlat;
+    }
+
+    if (skill === 'posture') {
+      // APPROXIMATION: can't distinguish lean vs shoulder raise without depth data
+      return streak >= 3 ? m.shoulderHigh : m.leaning;
+    }
+
+    if (skill === 'rhythm') {
+      // Prefer the drill-level stored latency (persists into FEEDBACK_HOLD)
+      // over the frame-level value (reset to null during sustain/silent).
+      // APPROXIMATION: latency < 200ms = anticipating (early);
+      //                latency > 700ms = hesitating (late).
+      const lat = AppState.drill.lastAttackLatencyMs ?? AppState.frame.attackLatencyMs;
+      if (lat !== null && lat < 200) return m.early;
+      if (lat !== null && lat > 700) return m.late;
+      return streak >= 3 ? m.late : m.early;  // fallback: no attack data this rep
+    }
+
+    if (skill === 'bow') {
+      return streak >= 3 ? m.tooFlat : m.tooSteep;
+    }
+
+    return null;
+  },
+
+  // Pick a praise message based on the current clean streak.
+  _praiseMessage(streak) {
+    const g = MESSAGES.general;
+    if (streak >= 10) return g.celebrate10;
+    if (streak >= 5)  return g.celebrate5;
+    // Milestone-specific: exactly 3 clean reps on a hold drill → use the "clean3" message
+    // ("3 clean notes in a row") rather than the generic praise.
+    const D = AppState.drill;
+    if (D.type === 'hold' && D.cleanReps === 3 && MESSAGES.pitch && MESSAGES.pitch.clean3) {
+      return MESSAGES.pitch.clean3;
+    }
+    // Skill-specific praise when a focusSkill is active
+    const focus = AppState.difficulty.focusSkill;
+    if (focus && MESSAGES[focus] && MESSAGES[focus].praise) {
+      return MESSAGES[focus].praise;
+    }
+    return (MESSAGES.pitch && MESSAGES.pitch.praise) || g.celebrate5;
+  },
+};
+
+
+/* ================================================================
+   MODULE 10 — ADAPTIVE DIFFICULTY
+   Implemented in Milestone 8.
+================================================================ */
+const AdaptiveDifficulty = {
+
+  // Called from the slow loop every CONFIG.windowMs (200 ms).
+  // Tracks consecutive poor/clean 200ms windows and nudges difficulty
+  // one step at a time. Conservative by design — counters reset on any
+  // middle-zone window, so transient noise doesn't trigger a change.
+  evaluate() {
+    if (AppState.lifecycle !== 'session') return;
+
+    // Overall score: mean of all non-null skill-track window scores.
+    // null scores (undetected tracks) don't drag down a partially-visible session.
+    const vals = Object.values(AppState.skillTracks)
+      .map(t => t.score).filter(v => v !== null);
+    if (!vals.length) return;   // nothing computable — stay put
+
+    const overall = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+    const D       = AppState.difficulty;
+
+    if (overall <= CONFIG.struggleThreshold) {
+      // ---- Trending poor -------------------------------------------------
+      D.cleanWindowCount = 0;
+      D.poorWindowCount++;
+
+      if (D.poorWindowCount >= CONFIG.poorWindowsToChange) {
+        D.poorWindowCount = 0;
+
+        // Step BPM down
+        D.bpm = Math.max(CONFIG.bpmMin, D.bpm - CONFIG.bpmStep);
+
+        // Narrow note range (min 2 — single note is too trivial for a scale)
+        if (D.noteRangeEnd > 2) D.noteRangeEnd--;
+
+        // Focus coaching on the weakest skill track.
+        // APPROXIMATION: lowest score wins; ties broken by priority order.
+        const worst = ['pitch', 'bow', 'rhythm', 'posture', 'finger']
+          .filter(s => AppState.skillTracks[s].score !== null)
+          .sort((a, b) => AppState.skillTracks[a].score -
+                          AppState.skillTracks[b].score)[0];
+        D.focusSkill = worst || null;
+      }
+
+    } else if (overall >= CONFIG.cleanRepThreshold) {
+      // ---- Trending clean ------------------------------------------------
+      D.poorWindowCount = 0;
+      D.cleanWindowCount++;
+
+      if (D.cleanWindowCount >= CONFIG.cleanWindowsToChange) {
+        D.cleanWindowCount = 0;
+
+        // Step BPM up
+        D.bpm = Math.min(CONFIG.bpmMax, D.bpm + CONFIG.bpmStep);
+
+        // Widen note range up to the full available set
+        const maxNotes = NOTES ? NOTES.length : 8;
+        if (D.noteRangeEnd < maxNotes) D.noteRangeEnd++;
+
+        // Player is doing well — broaden coaching back to all skills
+        D.focusSkill = null;
+      }
+
+    } else {
+      // ---- Middle zone — reset both streaks, no change -------------------
+      D.poorWindowCount  = 0;
+      D.cleanWindowCount = 0;
+    }
+  },
+};
+
+
+/* ================================================================
+   MODULE 11 — UI RENDERER
+   updateOverlays() is the only function that writes to the DOM.
+   All other modules write to AppState; this reads and renders.
+================================================================ */
+const UIRenderer = {
+
+  init() {
+    this._sizeCanvases();
+    window.addEventListener('resize', () => this._sizeCanvases());
+  },
+
+  _sizeCanvases() {
+    // Skeleton canvas: fill viewport (no DPR scaling — landmark coords are
+    // normalised 0-1, so we scale them to CSS px in CVPipeline anyway)
+    const sk = document.getElementById('skeleton-canvas');
+    sk.width  = window.innerWidth;
+    sk.height = window.innerHeight;
+
+    // Waveform canvas: physical = CSS × DPR (cap at 2 — no value beyond 2x)
+    // Use setTransform (not scale) so resize calls don't stack the matrix.
+    const wv  = document.getElementById('waveform-canvas');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    wv.width  = wv.offsetWidth * dpr;
+    wv.height = 64 * dpr;
+    const ctx = wv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // All subsequent draw calls use CSS coordinates: W=offsetWidth, H=64
+  },
+
+  // Called by slow loop (setInterval 200ms) and on state changes
+  updateOverlays() {
+    const S = AppState;
+
+    // --- Note badge + drill-state indicator ---
+    document.getElementById('current-note-name').textContent =
+      S.scheduler.currentNote ? S.scheduler.currentNote.name : '—';
+
+    // M18: for hold drills in ATTEMPT/FEEDBACK_HOLD show rep progress;
+    // otherwise show next-note name.  Gives the student a tangible target
+    // ("✓ 2 / 3 clean") without cluttering the display during scale passages.
+    const D = S.drill;
+    if (D.type === 'hold' &&
+        (D.state === 'ATTEMPT' || D.state === 'FEEDBACK_HOLD' || D.state === 'ANALYZING')) {
+      const checkmarks = '✓'.repeat(D.cleanReps) || '○';
+      document.getElementById('next-note-name').textContent =
+        `${checkmarks}  ${D.cleanReps} / ${D.requiredCleanReps} clean`;
+    } else {
+      document.getElementById('next-note-name').textContent =
+        S.scheduler.nextNote
+          ? `next: ${S.scheduler.nextNote.name}`
+          : 'next: —';
+    }
+    // Coloured top border shows the student where they are in the loop:
+    //   teal  = WAITING (ready to play)
+    //   amber = ATTEMPT / beat-clock active
+    //   blue  = evaluating / feedback hold
+    //
+    // M11: for non-hold drills the state machine stays WAITING throughout
+    // (DrillEngine bails early), so we can't use D.state to colour the badge.
+    // Instead, show ds-attempt (amber) whenever a note is actively displayed.
+    const _badgeClass =
+      (S.drill.type !== 'hold' && S.scheduler.currentNote !== null)
+        ? 'ds-attempt'
+        : ({
+            WAITING:       'ds-waiting',
+            ATTEMPT:       'ds-attempt',
+            ANALYZING:     'ds-hold',
+            FEEDBACK_HOLD: 'ds-hold',
+            ADVANCING:     'ds-hold',
+          }[S.drill.state] || '');
+    document.getElementById('note-badge').className = _badgeClass;
+
+    // --- Live pitch cents bar (M13) ---
+    // Fills left (flat) or right (sharp) from the centre tick.
+    // Visual range = ±(toleranceCents × 2); clips at the edges.
+    // APPROXIMATION: visual scale uses 2× tolerance as the full-deflection point.
+    {
+      const centsErr = S.frame.centsError;
+      const tol      = S.calib.toleranceCents || CONFIG.defaultToleranceCents;
+      const fill     = document.getElementById('cents-bar-fill');
+      if (centsErr === null || !S.scheduler.currentNote) {
+        fill.style.width = '0%';
+        fill.style.left  = '50%';
+      } else {
+        const ratio   = Math.min(1, Math.abs(centsErr) / (tol * 2));
+        const pct     = ratio * 50;
+        const isSharp = centsErr > 0;
+        fill.style.width      = `${pct}%`;
+        fill.style.left       = isSharp ? '50%' : `${50 - pct}%`;
+        fill.style.background = ratio > 0.75 ? 'var(--red)'
+                              : ratio > 0.35  ? 'var(--amber)'
+                              : 'var(--teal)';
+      }
+    }
+
+    // --- Phase banner + session progress (M17) ---
+    // Append CV-offline indicator when pose detection failed to load.
+    // This is the only persistent status indicator not overwritten by coaching messages.
+    document.getElementById('phase-banner').textContent =
+      (S.session.phase !== 'idle' ? S.session.phase.toUpperCase() : '—') +
+      (!S.status.mediapipeOk ? ' · no CV' : '');
+
+    // Session progress: percentage through all drills across all phases.
+    // Computes (drills completed before current phase) + (current drill index + 1)
+    // as a fraction of the total drill count in SESSION_TEMPLATE.
+    if (SESSION_TEMPLATE && SESSION_TEMPLATE.length) {
+      let totalDrills    = 0;
+      let completedBefore = 0;
+      SESSION_TEMPLATE.forEach((p, pi) => {
+        const n = p.drills ? p.drills.length : 0;
+        if (pi < S.session.phaseIndex) completedBefore += n;
+        totalDrills += n;
+      });
+      const currentPhase = SESSION_TEMPLATE[S.session.phaseIndex];
+      const phaseDrills  = currentPhase ? (currentPhase.drills ? currentPhase.drills.length : 1) : 1;
+      const drillsDone   = completedBefore + S.session.drillIndex + 1;
+      const pct          = totalDrills > 0 ? Math.round((drillsDone / totalDrills) * 100) : 0;
+
+      document.getElementById('session-progress-fill').style.width = `${pct}%`;
+      document.getElementById('session-progress-label').textContent =
+        S.session.phase !== 'idle'
+          ? `drill ${S.session.drillIndex + 1} / ${phaseDrills}`
+          : '';
+    }
+
+    // --- Session score (mean of non-null track scores) ---
+    const scores = Object.values(S.skillTracks)
+      .map(t => t.score).filter(v => v !== null);
+    const avg = scores.length
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+      : null;
+    document.getElementById('session-score-val').textContent =
+      avg !== null ? `${avg}%` : '—';
+
+    // --- Skill track mini-bars ---
+    ['pitch','bow','rhythm','posture','finger'].forEach(skill => {
+      const fill  = document.getElementById(`bar-${skill}`);
+      const score = S.skillTracks[skill].score;
+      if (score === null) {
+        fill.style.width    = '0%';
+        fill.className      = 'skill-bar-fill';
+      } else {
+        fill.style.width    = `${Math.max(0, Math.min(100, score))}%`;
+        fill.className      = 'skill-bar-fill'
+          + (score < 40 ? ' poor' : score < 65 ? ' low' : '');
+      }
+    });
+
+    // --- Waveform diff bars ---
+    this._setDiffBar(
+      'pitch',
+      S.skillTracks.pitch.score,
+      S.frame.centsError !== null
+        ? `${S.frame.centsError >= 0 ? '+' : ''}${Math.round(S.frame.centsError)}ct`
+        : '—'
+    );
+    this._setDiffBar(
+      'timing',
+      S.skillTracks.rhythm.score,
+      S.skillTracks.rhythm.score !== null
+        ? `${Math.round(S.skillTracks.rhythm.score)}%`
+        : '—'
+    );
+    this._setDiffBar(
+      'tone',
+      S.frame.toneScore,
+      S.frame.toneScore !== null
+        ? `${Math.round(S.frame.toneScore)}%`
+        : '—'
+    );
+
+    // --- Neck diagram (finger guide) ---
+    this._updateNeckDiagram();
+
+    // --- Streak + motivator ---
+    document.getElementById('streak-count').textContent  = S.motivator.streak;
+    document.getElementById('motivator-msg').textContent = S.motivator.message || '';
+
+    // --- BPM badge + FPS readout ---
+    document.getElementById('bpm-val').textContent = `♩ ${AppState.difficulty.bpm}`;
+    const fps = AppState.status.fps;
+    document.getElementById('fps-val').textContent = fps ? `${fps} fps` : '';
+
+    // --- Feedback bar ---
+    document.getElementById('feedback-dot').style.background = S.feedback.color;
+    document.getElementById('feedback-text').textContent     = S.feedback.message || '—';
+  },
+
+  _setDiffBar(name, score, label) {
+    const fill = document.getElementById(`diff-${name}`);
+    const val  = document.getElementById(`diff-${name}-val`);
+    val.textContent = label;
+    if (score === null) {
+      fill.style.width      = '0%';
+      fill.style.background = 'rgba(255,255,255,0.12)';
+      return;
+    }
+    const pct = Math.max(0, Math.min(100, score));
+    fill.style.width      = `${pct}%`;
+    fill.style.background = pct >= 75 ? 'var(--teal)'
+                          : pct >= 50 ? 'var(--amber)'
+                          : 'var(--red)';
+  },
+
+  // Update the neck SVG to show active and next note positions
+  _updateNeckDiagram() {
+    const S     = AppState;
+    const note  = S.scheduler.currentNote;
+    const next  = S.scheduler.nextNote;
+    const active = document.getElementById('neck-active');
+    const nextEl = document.getElementById('neck-next');
+    const label  = document.getElementById('neck-note-label');
+
+    if (!note) return;
+
+    // Position active marker
+    active.setAttribute('cx', note.stringX);
+    active.setAttribute('cy', note.neckPositionY);
+    label.setAttribute('x',  note.stringX + 12);
+    label.setAttribute('y',  note.neckPositionY + 4);
+    label.textContent = note.name;
+
+    // Color: open string = dashed blue circle; fingered = filled with finger color
+    if (note.fingerIndex === 0) {
+      active.setAttribute('fill', 'none');
+      active.setAttribute('stroke', 'var(--blue-ref)');
+      active.setAttribute('stroke-dasharray', '3 2');
+      active.setAttribute('r', '7');
+    } else {
+      active.setAttribute('fill', note.fingerColor || 'var(--amber)');
+      active.setAttribute('stroke', 'none');
+      active.setAttribute('stroke-dasharray', '0');
+      active.setAttribute('r', '7');
+    }
+
+    // Next note indicator (faint)
+    if (next) {
+      nextEl.setAttribute('cx', next.stringX);
+      nextEl.setAttribute('cy', next.neckPositionY);
+      nextEl.style.display = '';
+    } else {
+      nextEl.style.display = 'none';
+    }
+  },
+
+  // ---- Skeleton canvas ------------------------------------------
+
+  // Draws a faint body-position guide on the skeleton canvas.
+  // Sourced from erhu_coach_screen_mockup.html skeleton SVG proportions,
+  // scaled to actual canvas dimensions.
+  // This shows until CVPipeline (M6) takes over with live landmark data.
+  drawSkeletonPlaceholder() {
+    const canvas = document.getElementById('skeleton-canvas');
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Scale factors from mockup viewBox (640×360) to actual canvas
+    const sx = W / 640;
+    const sy = H / 360;
+    const s  = (x, y) => [x * sx, y * sy];
+
+    // Very low opacity — purely a position guide, not fake live data
+    ctx.globalAlpha  = 0.10;
+    ctx.strokeStyle  = '#ffffff';
+    ctx.lineWidth    = 2;
+    ctx.lineCap      = 'round';
+
+    // Head
+    ctx.beginPath();
+    const [hx, hy] = s(318, 70);
+    ctx.arc(hx, hy, 18 * sx, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Spine
+    ctx.beginPath();
+    ctx.moveTo(...s(318, 88));
+    ctx.lineTo(...s(318, 170));
+    ctx.stroke();
+
+    // Left arm (bow arm) — amber
+    ctx.strokeStyle = '#EF9F27';
+    ctx.lineWidth   = 2.5 * sx;
+    ctx.beginPath();
+    ctx.moveTo(...s(318, 110)); ctx.lineTo(...s(260, 145));
+    ctx.lineTo(...s(210, 172)); ctx.lineTo(...s(170, 190));
+    ctx.stroke();
+
+    // Right arm (finger arm) — teal
+    ctx.strokeStyle = '#5DCAA5';
+    ctx.beginPath();
+    ctx.moveTo(...s(318, 110)); ctx.lineTo(...s(376, 138));
+    ctx.lineTo(...s(420, 162)); ctx.lineTo(...s(460, 155));
+    ctx.stroke();
+
+    // Legs
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth   = 1.5 * sx;
+    ctx.globalAlpha = 0.07;
+    ctx.beginPath();
+    ctx.moveTo(...s(318, 170)); ctx.lineTo(...s(298, 250));
+    ctx.moveTo(...s(318, 170)); ctx.lineTo(...s(338, 250));
+    ctx.stroke();
+
+    // "Position yourself here" label — centred under head
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle   = '#ffffff';
+    ctx.font        = `${Math.round(12 * sx)}px -apple-system, sans-serif`;
+    ctx.textAlign   = 'center';
+    ctx.fillText('position yourself here', W / 2, s(318, 280)[1]);
+
+    ctx.globalAlpha = 1;
+  },
+
+  // Called by CVPipeline (M6) before drawing live landmarks
+  drawSkeletonClear() {
+    const canvas = document.getElementById('skeleton-canvas');
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  },
+
+  // Draw live pose + hand landmarks from a MediaPipe detectForVideo() result.
+  // Called every frame from CVPipeline.detectForVideo().
+  // Replaces drawSkeletonPlaceholder() once real detection is running.
+  drawSkeleton(poseResult, handResult) {
+    const canvas = document.getElementById('skeleton-canvas');
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    if (!poseResult || !poseResult.landmarks || !poseResult.landmarks.length) return;
+
+    const lm = poseResult.landmarks[0];
+
+    // landmark index → canvas px, accounting for mirroring if needed
+    const px = (p) => [p.x * W, p.y * H];
+
+    // Draw one limb segment; skip if either endpoint visibility is low
+    const drawSeg = (i, j, color, alpha, width) => {
+      const a = lm[i], b = lm[j];
+      if (!a || !b) return;
+      const vis = Math.min(a.visibility || 0, b.visibility || 0);
+      if (vis < 0.3) return;
+      ctx.globalAlpha = alpha * Math.min(1, vis + 0.2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = width;
+      ctx.lineCap     = 'round';
+      ctx.beginPath();
+      ctx.moveTo(...px(a));
+      ctx.lineTo(...px(b));
+      ctx.stroke();
+    };
+
+    // Draw a joint dot; skip if visibility is low
+    const drawDot = (i, color, r) => {
+      const p = lm[i];
+      if (!p || (p.visibility || 0) < 0.3) return;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle   = color;
+      ctx.beginPath();
+      ctx.arc(...px(p), r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    // Torso / spine — neutral white (low opacity)
+    drawSeg(11, 12, '#ffffff', 0.35, 2);
+    drawSeg(11, 23, '#ffffff', 0.22, 1.5);
+    drawSeg(12, 24, '#ffffff', 0.22, 1.5);
+    drawSeg(23, 24, '#ffffff', 0.22, 1.5);
+
+    // Left arm = finger arm (teal) — shoulder(11)→elbow(13)→wrist(15)
+    drawSeg(11, 13, '#5DCAA5', 0.72, 3);
+    drawSeg(13, 15, '#5DCAA5', 0.72, 3);
+
+    // Right arm = bow arm (amber) — shoulder(12)→elbow(14)→wrist(16)
+    drawSeg(12, 14, '#EF9F27', 0.72, 3);
+    drawSeg(14, 16, '#EF9F27', 0.72, 3);
+
+    // Key joints
+    drawDot(0,  '#ffffff', 7);   // nose / head
+    drawDot(11, '#5DCAA5', 5);   // L-shoulder
+    drawDot(13, '#5DCAA5', 4);   // L-elbow
+    drawDot(15, '#5DCAA5', 5);   // L-wrist
+    drawDot(12, '#EF9F27', 5);   // R-shoulder
+    drawDot(14, '#EF9F27', 4);   // R-elbow
+    drawDot(16, '#EF9F27', 5);   // R-wrist
+
+    ctx.globalAlpha = 1;
+
+    // Hand landmarks — draw each hand as dots + palm lines
+    if (handResult && handResult.landmarks) {
+      // MediaPipe hand connections (palm + finger base rays)
+      // Wrist=0; per-finger: [0,1,2,3,4], [0,5,6,7,8], [0,9,10,11,12],
+      //                      [0,13,14,15,16], [0,17,18,19,20]
+      const HAND_SEGMENTS = [
+        [0,1],[1,2],[2,3],[3,4],          // thumb
+        [0,5],[5,6],[6,7],[7,8],          // index
+        [0,9],[9,10],[10,11],[11,12],     // middle
+        [0,13],[13,14],[14,15],[15,16],   // ring
+        [0,17],[17,18],[18,19],[19,20],   // pinky
+        [5,9],[9,13],[13,17],             // palm knuckle bar
+      ];
+
+      handResult.landmarks.forEach((hand) => {
+        ctx.globalAlpha = 0.60;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth   = 1.5;
+        ctx.lineCap     = 'round';
+        HAND_SEGMENTS.forEach(([a, b]) => {
+          const pa = hand[a], pb = hand[b];
+          if (!pa || !pb) return;
+          ctx.beginPath();
+          ctx.moveTo(pa.x * W, pa.y * H);
+          ctx.lineTo(pb.x * W, pb.y * H);
+          ctx.stroke();
+        });
+        ctx.globalAlpha = 0.75;
+        ctx.fillStyle   = '#ffffff';
+        hand.forEach((p) => {
+          ctx.beginPath();
+          ctx.arc(p.x * W, p.y * H, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+      ctx.globalAlpha = 1;
+    }
+  },
+
+  // ---- Waveform animation ----------------------------------------
+
+  _waveRaf:     null,
+  _waveRunning: false,
+  _waveTime:    0,
+
+  // Start the rAF waveform loop. Call once from enterApp().
+  // M5 will replace _drawWaveframe() with real analyser data;
+  // the loop itself and the reference-wave drawing stay as-is.
+  startWaveformLoop() {
+    if (this._waveRunning) return;
+    this._waveRunning = true;
+
+    const canvas = document.getElementById('waveform-canvas');
+    const ctx    = canvas.getContext('2d');
+
+    const tick = () => {
+      if (!this._waveRunning) return;
+      this._drawWaveform(canvas, ctx);
+      this._waveTime   += 0.008;
+      this._waveRaf     = requestAnimationFrame(tick);
+    };
+    tick();
+  },
+
+  stopWaveformLoop() {
+    this._waveRunning = false;
+    if (this._waveRaf) { cancelAnimationFrame(this._waveRaf); this._waveRaf = null; }
+  },
+
+  // Draws reference wave + live wave on the waveform canvas.
+  // Reference wave: always animated sine at target note's visual frequency.
+  // Live wave: flat line until M5 fills AppState.frame with real analyser data.
+  _drawWaveform(canvas, ctx) {
+    const W = canvas.offsetWidth;
+    const H = 64; // CSS height
+    ctx.clearRect(0, 0, W, H);
+
+    const t    = this._waveTime;
+    const note = AppState.scheduler.currentNote;
+
+    // Scale the visual wave period to the target note's frequency.
+    // D4 (293.66 Hz) = baseline visual frequency of 0.045 cycles/px.
+    // Higher notes appear visually "faster" — pedagogically helpful.
+    const freqRatio  = note ? (note.freq / 293.66) : 1;
+    const visualFreq = 0.045 * Math.pow(freqRatio, 0.6); // soften the ratio — full ratio is too fast at D5
+
+    // --- Reference wave (blue) ---
+    ctx.strokeStyle  = '#378ADD';
+    ctx.lineWidth    = 1.5;
+    ctx.globalAlpha  = 0.65;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x++) {
+      const y = H / 2 + Math.sin((x * visualFreq + t) * Math.PI * 2) * 20;
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // --- Live wave (teal) ---
+    // M5 replaces this block with real analyser time-domain data.
+    // Until then: flat line when silent, placeholder offset wave when active.
+    ctx.strokeStyle  = '#5DCAA5';
+    ctx.globalAlpha  = 0.80;
+    ctx.beginPath();
+
+    const hasSignal = AppState.status.micOk
+                   && AppState.frame.notePhase !== 'silent'
+                   && AppState.frame.rms > 0.005;
+
+    if (hasSignal && AppState.frame.timeDomainData) {
+      // M5: real analyser data path — draws from Float32Array
+      const data = AppState.frame.timeDomainData;
+      const step = data.length / W;
+      for (let x = 0; x <= W; x++) {
+        const i = Math.floor(x * step);
+        const y = H / 2 + (data[i] || 0) * (H / 2) * 0.85;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+    } else {
+      // Flat — no signal or mic not active
+      ctx.moveTo(0, H / 2);
+      ctx.lineTo(W, H / 2);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  },
+
+  // Show the end-of-session summary overlay.
+  // Computes a final score from the last window's skillTrack averages.
+  showSummary() {
+    const scores = Object.values(AppState.skillTracks)
+      .map(t => t.score).filter(v => v !== null);
+    const avg = scores.length
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+      : null;
+
+    document.getElementById('summary-score-val').textContent =
+      avg !== null ? `${avg}%` : '—';
+
+    const streak = AppState.motivator.streak;
+    let sub;
+    if      (streak >= 10) sub = `${streak} clean reps in a row — excellent work`;
+    else if (streak >= 5)  sub = `${streak} clean reps — great session`;
+    else if (streak >= 1)  sub = `${streak} clean rep${streak > 1 ? 's' : ''} — keep it up`;
+    else                   sub = 'Keep practicing — every session counts';
+    document.getElementById('summary-sub').textContent = sub;
+
+    document.getElementById('summary-screen').hidden = false;
+  },
+
+  hideSummary() {
+    document.getElementById('summary-screen').hidden = true;
+  },
+
+};
+
+
+/* ================================================================
+   MODULE 12 — QA LAYER
+   Named failure states. Nothing fails silently.
+   Full wiring in Milestone 10.
+================================================================ */
+const QA = {
+  STATES: {
+    PERM_CAMERA_DENIED:   'Camera access needed — click the camera icon in Chrome\'s address bar',
+    PERM_MIC_DENIED:      'Mic access needed — check Chrome permissions for this site',
+    MEDIAPIPE_LOAD_FAILED:'Could not load pose detection — check your internet connection',
+    NO_BODY_IN_FRAME:     'Move into frame — can\'t see you',
+    SILENCE:              'Can\'t hear you — check your microphone',
+    NOISY_ROOM:           'Noisy environment detected — tolerance widened',
+    NOTES_LOAD_FAILED:    'Could not load notes.json — is the server running?',
+  },
+
+  // Non-blocking warning in the feedback bar
+  warn(stateKey, override) {
+    const msg = override || this.STATES[stateKey] || stateKey;
+    document.getElementById('feedback-text').textContent      = msg;
+    document.getElementById('feedback-dot').style.background  = 'var(--amber)';
+  },
+
+  // Blocking overlay for unrecoverable errors
+  block(stateKey, override) {
+    const msg = override || this.STATES[stateKey] || stateKey;
+    document.getElementById('error-title').textContent = 'Cannot continue';
+    document.getElementById('error-body').textContent  = msg;
+    document.getElementById('error-overlay').hidden    = false;
+    console.error('[QA BLOCK]', stateKey, msg);
+  },
+
+  clear() {
+    document.getElementById('error-overlay').hidden = true;
+  },
+};
+
+
+/* ================================================================
+   REFERENCE TONE PLAYBACK
+   Extracted from erhu_note_comparison_panel.html playRef().
+   Uses a fresh short-lived AudioContext — independent of the mic
+   AudioContext so it works even if mic was denied.
+   Sawtooth wave approximates erhu timbre (rich in odd harmonics).
+================================================================ */
+function playRefTone(freq) {
+  if (!freq) return;
+  try {
+    const ac   = new AudioContext();
+    const osc  = ac.createOscillator();
+    const gain = ac.createGain();
+
+    osc.connect(gain);
+    gain.connect(ac.destination);
+
+    osc.type            = 'sawtooth'; // closest cheap approximation to erhu tone
+    osc.frequency.value = freq;
+
+    // Soft attack, hold, decay — avoids click artefacts
+    gain.gain.setValueAtTime(0.001, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.15,  ac.currentTime + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 1.4);
+
+    osc.start();
+    osc.stop(ac.currentTime + 1.5);
+
+    // Let the context close itself after the note ends
+    osc.onended = () => { try { ac.close(); } catch (_) {} };
+  } catch (e) {
+    // AudioContext creation can fail if the page has no user gesture — safe to ignore
+  }
+}
+
+// ---- Fast loop (~60 fps via requestAnimationFrame) ----------------------
+// Drives AudioPipeline.tick() every frame during an active session.
+// M6 adds CVPipeline.detectForVideo() here.
+// Started by enterApp(); stopped if session is torn down (M8).
+
+let _fastLoopRunning = false;
+
+// FPS tracking (M10) — lightweight, written to AppState.status.fps
+// We count how many rAF calls we get in each rolling 1-second window.
+let _fpsFrameCount  = 0;
+let _fpsWindowStart = 0;
+
+function _fastLoopTick(timestamp) {
+  if (!_fastLoopRunning) return;
+
+  // --- FPS counter (M10) ---
+  if (_fpsWindowStart === 0) _fpsWindowStart = timestamp;
+  _fpsFrameCount++;
+  if (timestamp - _fpsWindowStart >= 1000) {
+    AppState.status.fps  = _fpsFrameCount;
+    _fpsFrameCount       = 0;
+    _fpsWindowStart      = timestamp;
+  }
+
+  // Audio tick — reads mic, updates AppState.frame pitch/rms fields
+  if (AudioPipeline.analyser) AudioPipeline.tick();
+
+  // CV tick — runs pose + hand detection, draws skeleton, updates AppState.frame CV fields
+  if (AppState.status.mediapipeOk) {
+    CVPipeline.detectForVideo(document.getElementById('camera-feed'), timestamp);
+  }
+
+  // Score tick — runs after both pipelines; pushes snapshot to frameHistory
+  ScoringEngine.computeFrame();
+
+  requestAnimationFrame(_fastLoopTick);
+}
+
+// -------------------------------------------------------------------------
+
+/* ================================================================
+   M10 — SESSION HEALTH UTILITIES
+   _noPoseSince:   timestamp when poseConfidence last dropped below threshold.
+   _checkSessionHealth(): called every slow-loop tick; shows QA warning if no
+     body in frame for >5s. Clears when pose returns.
+   _resetSession(): full soft-reset that rewinds AppState without tearing down
+     pipelines. Called by "Practice Again" to start a fresh session.
+================================================================ */
+
+let _noPoseSince = 0;  // 0 = pose is currently OK
+
+function _checkSessionHealth() {
+  if (AppState.lifecycle !== 'session') return;
+
+  // --- No-body-in-frame guard (M10) ---
+  // APPROXIMATION: poseConfidence threshold (0.4) is a heuristic.
+  // A seated player with a partially visible torso may hover around this value.
+  const conf = AppState.frame.poseConfidence;
+  const now  = Date.now();
+
+  if (conf !== null && conf < 0.4) {
+    if (_noPoseSince === 0) _noPoseSince = now;
+    if (now - _noPoseSince > 5000) {
+      QA.warn('NO_BODY_IN_FRAME');
+    }
+  } else {
+    if (_noPoseSince !== 0) {
+      _noPoseSince = 0;
+      QA.clear();  // pose returned — dismiss the warning
+    }
+  }
+}
+
+function _resetSession() {
+  // Stop the current session's timer-driven machinery
+  if (AppState._slowLoop) {
+    clearInterval(AppState._slowLoop);
+    AppState._slowLoop = null;
+  }
+  NoteScheduler.stop();
+
+  // Stop waveform RAF loop — prevents accumulation on repeated Practice Again clicks.
+  // enterApp() calls startWaveformLoop() after reset, so the guard there works cleanly.
+  UIRenderer.stopWaveformLoop();
+
+  // --- Lifecycle + phase ---
+  AppState.lifecycle          = 'session';
+  AppState.session.phase      = 'idle';
+  AppState.session.phaseIndex = 0;
+  AppState.session.drillIndex = 0;
+
+  // --- Drill state machine ---
+  AppState.drill.state               = 'WAITING';
+  AppState.drill.type                = null;
+  AppState.drill.repCount            = 0;
+  AppState.drill.cleanReps           = 0;
+  AppState.drill.attemptStartTime    = 0;
+  AppState.drill.feedbackHoldUntil   = 0;
+  AppState.drill.lastAttackLatencyMs = null;
+  AppState.drill.lastWindowScore     = null;
+
+  // --- History buffers ---
+  AppState.frameHistory.length = 0;
+
+  // --- Skill tracks ---
+  ['pitch','bow','rhythm','posture','finger'].forEach(s => {
+    AppState.skillTracks[s].score   = null;
+    AppState.skillTracks[s].history = [];
+  });
+
+  // --- Feedback ---
+  AppState.feedback.message = '';
+  AppState.feedback.color   = 'var(--text-dim)';
+  Object.keys(AppState.feedback.mistakeStreak || {}).forEach(k => {
+    AppState.feedback.mistakeStreak[k] = 0;
+  });
+
+  // --- Motivator ---
+  AppState.motivator.streak         = 0;
+  AppState.motivator.message        = '';
+  AppState.motivator.celebrating    = false;
+  AppState.motivator.lastPraiseTime = 0;   // M16 fix: allow praise from the first rep
+
+  // --- Adaptive difficulty ---
+  AppState.difficulty.bpm              = CONFIG.bpmStart;
+  AppState.difficulty.noteRangeEnd     = 2;     // M16 fix: was missing; start back at D4+E4
+  AppState.difficulty.focusSkill       = null;
+  AppState.difficulty.poorWindowCount  = 0;
+  AppState.difficulty.cleanWindowCount = 0;
+
+  // --- Scheduler ---
+  AppState.scheduler.currentNoteId = null;   // clear stale note id
+  AppState.scheduler.currentNote   = null;
+  AppState.scheduler.nextNote      = null;
+  AppState.scheduler.noteStartTime = 0;      // prevents stale rhythm latency on first note
+  AppState.scheduler._lastAttackRhythmScore = null;
+
+  // --- FeedbackSelector private state ---
+  FeedbackSelector._lastHoldTs      = 0;
+  FeedbackSelector._lastState       = null;
+  FeedbackSelector._waitingSince    = 0;
+  FeedbackSelector._lastBeatCount   = 0;   // M11
+  FeedbackSelector._silentBeatCount = 0;   // M17
+
+  // Reset beat/stability counters on restart
+  AppState.scheduler.beatCount            = 0;
+  AppState.scheduler.stableFramesThisBeat = 0;
+  AppState.scheduler.prevBeatStableFrames = 0;
+
+  // --- Health tracker ---
+  _noPoseSince    = 0;
+  _fpsFrameCount  = 0;
+  _fpsWindowStart = 0;
+}
+
+/* ================================================================
+   STARTUP SEQUENCE
+================================================================ */
+
+// Load curriculum data from notes.json
+async function loadCurriculum() {
+  try {
+    const res  = await fetch('notes.json');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    NOTES            = data.notes;
+    SESSION_TEMPLATE = data.sessionTemplate;
+    MESSAGES         = data.messages;
+    // Build lookup index
+    NOTES_BY_ID = {};
+    NOTES.forEach(n => { NOTES_BY_ID[n.id] = n; });
+  } catch (err) {
+    // Block the UI — student cannot practice without note data
+    QA.block('NOTES_LOAD_FAILED', `Could not load notes.json (${err.message}). Make sure the server is running.`);
+    throw err;  // re-throw so the caller's await chain halts
+  }
+}
+
+// Restore session count from localStorage
+function loadSessionCount() {
+  const v = parseInt(localStorage.getItem('erhu_session_count') || '0', 10);
+  AppState.calib.sessionCount = isNaN(v) ? 0 : v;
+}
+
+// Increment and persist session count
+function saveSessionCount() {
+  const next = (AppState.calib.sessionCount || 0) + 1;
+  AppState.calib.sessionCount = next;
+  try { localStorage.setItem('erhu_session_count', String(next)); } catch (_) {}
+}
+
+// Transition from calibration screen to app
+function enterApp() {
+  document.getElementById('calibration-screen').hidden = true;
+  document.getElementById('app').hidden = false;
+  AppState.lifecycle = 'session';
+
+  // Connect camera stream to the video element.
+  // Stream was obtained in initCamera() during the Start button click.
+  const video = document.getElementById('camera-feed');
+  if (CVPipeline.stream && !video.srcObject) {
+    video.srcObject = CVPipeline.stream;
+    // autoplay attribute alone is unreliable after programmatic srcObject
+    // assignment in Chrome — explicit play() required
+    video.play().catch(() => {
+      QA.warn('Camera stream could not autoplay — try clicking the page first');
+    });
+  }
+
+  UIRenderer.init();
+
+  // Show D4 as the initial note so the neck diagram and note badge
+  // are not blank while the session engine loads (M4).
+  if (NOTES_BY_ID['D4']) {
+    AppState.scheduler.currentNote = NOTES_BY_ID['D4'];
+    AppState.scheduler.nextNote    = NOTES_BY_ID['E4'] || null;
+  }
+
+  // Skeleton guide — replaced by live landmarks in M6
+  UIRenderer.drawSkeletonPlaceholder();
+
+  // Animated reference waveform — replaced by real analyser data in M5
+  UIRenderer.startWaveformLoop();
+
+  UIRenderer.updateOverlays();
+
+  // Wire "Play reference" button — onclick assignment avoids stacking if
+  // enterApp() is ever called again on session restart (M8)
+  document.getElementById('btn-play-ref').onclick = () => {
+    const note = AppState.scheduler.currentNote;
+    playRefTone(note ? note.freq : 293.66);
+  };
+
+  // Wire "Practice Again" button (M10) — dismisses summary overlay, resets
+  // AppState, and restarts the session without tearing down pipelines.
+  document.getElementById('btn-practice-again').onclick = () => {
+    UIRenderer.hideSummary();
+    _resetSession();
+    UIRenderer.startWaveformLoop();   // restart animation stopped by _resetSession
+
+    // Restart the slow loop (was cleared by _resetSession)
+    AppState._slowLoop = setInterval(() => {
+      ScoringEngine.computeWindow();
+      DrillEngine.evaluate();
+      AdaptiveDifficulty.evaluate();
+      FeedbackSelector.select();
+      _checkSessionHealth();
+      UIRenderer.updateOverlays();
+    }, CONFIG.windowMs);
+
+    NoteScheduler.start();
+    UIRenderer.updateOverlays();
+  };
+
+  // M20: Recalibrate button — hides summary, shows calibration screen.
+  // Runs a fresh Calibration.run(); on completion enterApp() is called again
+  // which restarts the session with fresh tolerance values.
+  document.getElementById('btn-recalibrate').onclick = async () => {
+    UIRenderer.hideSummary();
+    _resetSession();
+    document.getElementById('calibration-screen').hidden = false;
+    document.getElementById('app').hidden = true;
+    try {
+      await Calibration.run();
+    } catch (_) {}
+    if (!Calibration._cancelled) {
+      document.getElementById('calibration-screen').hidden = true;
+      enterApp();
+    }
+  };
+
+  // --- Slow loop (200ms) ---
+  // Calls updateOverlays() every window tick.
+  // M7 adds ScoringEngine.computeWindow() here.
+  // M8 adds DrillEngine.evaluate() here.
+  // M9 adds FeedbackSelector.select() here.
+  // Store handle on AppState so M8 session-restart can clear it.
+  AppState._slowLoop = setInterval(() => {
+    ScoringEngine.computeWindow();    // M7: average frameHistory → skillTrack scores
+    DrillEngine.evaluate();           // M8: advance hold-drill state machine
+    AdaptiveDifficulty.evaluate();    // M8: nudge bpm/range/focusSkill on streaks
+    FeedbackSelector.select();        // M9: pick one coaching message per rep
+    _checkSessionHealth();            // M10: no-body-in-frame guard
+    UIRenderer.updateOverlays();
+  }, CONFIG.windowMs);
+
+  // --- Note scheduler + session engine ---
+  // NoteScheduler.start() → SessionEngine.start() → first phase + drill.
+  // Remove the placeholder D4 set in M3 — SessionEngine sets the real first note.
+  AppState.scheduler.currentNote = null;
+  AppState.scheduler.nextNote    = null;
+  NoteScheduler.start();
+
+  // Start fast loop (M5) — drives AudioPipeline.tick() every frame.
+  // AudioPipeline.init() is called from btn-start BEFORE enterApp(), so
+  // analyser is already wired up by the time we reach here.
+  if (!_fastLoopRunning) {
+    _fastLoopRunning = true;
+    requestAnimationFrame(_fastLoopTick);
+  }
+
+  // Initialise MediaPipe CV pipeline (M6).
+  // Non-blocking: runs in background; sets AppState.status.mediapipeOk when ready.
+  // Fast loop gates CV calls on mediapipeOk, so no race condition.
+  CVPipeline.init();  // errors handled inside — QA.block() on failure
+}
+
+
+// ---- Start button ----
+document.getElementById('btn-start').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-start');
+  btn.disabled    = true;
+  btn.textContent = 'Loading…';
+
+  try {
+    // Step 1: load curriculum data
+    await loadCurriculum();
+    loadSessionCount();
+
+    // Step 2: camera — required, throws on failure
+    btn.textContent = 'Allow camera…';
+    await initCamera();
+
+    // Step 3: mic — optional, warns on failure, never throws
+    // AudioContext is also created here, while inside the user gesture chain
+    btn.textContent = 'Allow microphone…';
+    await initMic();
+
+    // Step 4: permissions done — proceed to calibration screen
+    document.getElementById('start-screen').hidden      = true;
+    document.getElementById('calibration-screen').hidden = false;
+    AppState.lifecycle = 'calibrating';
+
+    // Step 5: init audio pipeline (imports Pitchy, wires AnalyserNode)
+    // Must happen after initMic() has created AudioPipeline.audioCtx.
+    await AudioPipeline.init(AudioPipeline.micStream).catch(err => {
+      QA.warn('Audio pipeline init failed: ' + err.message);
+    });
+
+    // Step 6: run calibration (noise floor + D4 pitch collection)
+    // When complete — or timed out — _finalize() sets toleranceCents.
+    // skip() sets _cancelled = true and calls enterApp() directly,
+    // so the .then() guard prevents a double-call to enterApp().
+    Calibration.run()
+      .then(() => { if (!Calibration._cancelled) enterApp(); })
+      .catch(err => {
+        QA.warn('Calibration error — using defaults: ' + err.message);
+        Calibration.skip();
+        enterApp();
+      });
+
+  } catch (err) {
+    // initCamera() threw — QA.block() already called, just re-enable button
+    btn.disabled    = false;
+    btn.textContent = 'Start Practice';
+  }
+});
+
+// ---- Skip calibration ----
+// Sets _cancelled so the in-progress Calibration.run() promise does not
+// also call enterApp() after we return here.
+document.getElementById('btn-skip-calib').addEventListener('click', () => {
+  Calibration.skip();
+  enterApp();
+});
+
+// ---- Retry after blocking error ----
+document.getElementById('btn-retry').addEventListener('click', () => {
+  QA.clear();
+  // Return to start screen for a clean retry
+  document.getElementById('start-screen').hidden = false;
+  const btn = document.getElementById('btn-start');
+  btn.disabled    = false;
+  btn.textContent = 'Start Practice';
+});
+
+</script>
+</body>
+</html>

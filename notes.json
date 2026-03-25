@@ -1,0 +1,187 @@
+{
+  "version": "1.0",
+
+  "notes": [
+    {
+      "id": "D4",
+      "name": "D4",
+      "freq": 293.66,
+      "string": "D",
+      "fingerIndex": 0,
+      "neckPositionY": 22,
+      "stringX": 47,
+      "label": "Open D string",
+      "fingerColor": null
+    },
+    {
+      "id": "E4",
+      "name": "E4",
+      "freq": 329.63,
+      "string": "D",
+      "fingerIndex": 1,
+      "neckPositionY": 55,
+      "stringX": 47,
+      "label": "First finger, D string",
+      "fingerColor": "#EF9F27"
+    },
+    {
+      "id": "F#4",
+      "name": "F#4",
+      "freq": 369.99,
+      "string": "D",
+      "fingerIndex": 2,
+      "neckPositionY": 80,
+      "stringX": 47,
+      "label": "Second finger, D string",
+      "fingerColor": "#7F77DD"
+    },
+    {
+      "id": "G4",
+      "name": "G4",
+      "freq": 392.00,
+      "string": "D",
+      "fingerIndex": 3,
+      "neckPositionY": 105,
+      "stringX": 47,
+      "label": "Third finger, D string",
+      "fingerColor": "#D85A30"
+    },
+    {
+      "id": "A4",
+      "name": "A4",
+      "freq": 440.00,
+      "string": "A",
+      "fingerIndex": 0,
+      "neckPositionY": 22,
+      "stringX": 53,
+      "label": "Open A string",
+      "fingerColor": null
+    },
+    {
+      "id": "B4",
+      "name": "B4",
+      "freq": 493.88,
+      "string": "A",
+      "fingerIndex": 1,
+      "neckPositionY": 55,
+      "stringX": 53,
+      "label": "First finger, A string",
+      "fingerColor": "#EF9F27"
+    },
+    {
+      "id": "C#5",
+      "name": "C#5",
+      "freq": 554.37,
+      "string": "A",
+      "fingerIndex": 2,
+      "neckPositionY": 80,
+      "stringX": 53,
+      "label": "Second finger, A string",
+      "fingerColor": "#7F77DD"
+    },
+    {
+      "id": "D5",
+      "name": "D5",
+      "freq": 587.33,
+      "string": "A",
+      "fingerIndex": 3,
+      "neckPositionY": 105,
+      "stringX": 53,
+      "label": "Third finger, A string",
+      "fingerColor": "#D85A30"
+    }
+  ],
+
+  "sessionTemplate": [
+    {
+      "phase": "warmup",
+      "label": "Warm Up",
+      "scoringPressure": false,
+      "drills": [
+        { "type": "hold", "noteId": "D4", "durationMs": 4000, "requiredCleanReps": 1 },
+        { "type": "hold", "noteId": "A4", "durationMs": 4000, "requiredCleanReps": 1 },
+        { "type": "hold", "noteId": "D4", "durationMs": 4000, "requiredCleanReps": 1 }
+      ]
+    },
+    {
+      "phase": "drill",
+      "label": "Drill",
+      "scoringPressure": true,
+      "drills": [
+        { "type": "hold",       "noteId": "D4",                       "durationMs": 3000, "requiredCleanReps": 3 },
+        { "type": "hold",       "noteId": "E4",                       "durationMs": 3000, "requiredCleanReps": 3 },
+        { "type": "transition", "noteIds": ["D4", "E4"],              "durationMs": 2000, "requiredCleanReps": 3 },
+        { "type": "hold",       "noteId": "F#4",                      "durationMs": 3000, "requiredCleanReps": 3 },
+        { "type": "transition", "noteIds": ["E4", "F#4"],             "durationMs": 2000, "requiredCleanReps": 3 },
+        { "type": "hold",       "noteId": "G4",                       "durationMs": 3000, "requiredCleanReps": 3 },
+        { "type": "transition", "noteIds": ["F#4", "G4"],             "durationMs": 2000, "requiredCleanReps": 3 }
+      ]
+    },
+    {
+      "phase": "scale",
+      "label": "Scale",
+      "scoringPressure": true,
+      "drills": [
+        {
+          "type": "scale",
+          "noteIds": ["D4","E4","F#4","G4","A4","B4","C#5","D5"],
+          "bpmMultiplier": 1.0,
+          "requiredCleanReps": 2
+        }
+      ]
+    },
+    {
+      "phase": "performance",
+      "label": "Performance",
+      "scoringPressure": true,
+      "drills": [
+        {
+          "type": "sequence",
+          "noteIds": ["D4","E4","F#4","G4","A4","B4","C#5","D5"],
+          "bpmMultiplier": 1.0,
+          "requiredCleanReps": 1
+        }
+      ]
+    }
+  ],
+
+  "messages": {
+    "pitch": {
+      "slightlySharp":  "a touch sharp — try a bit less bow pressure",
+      "slightlyFlat":   "a little flat — try a bit more bow speed",
+      "wildlyOff":      "let's find that note — listen to the reference",
+      "unstable":       "hold it steady — keep the bow moving smoothly",
+      "improving":      "your pitch is stabilizing",
+      "clean3":         "3 clean notes in a row",
+      "praise":         "nice intonation"
+    },
+    "bow": {
+      "tooSteep":   "flatten your wrist a bit",
+      "tooFlat":    "bring the bow up slightly",
+      "improving":  "nice control there",
+      "praise":     "good bow angle"
+    },
+    "rhythm": {
+      "early":      "a touch early — wait for the beat",
+      "late":       "a little late — feel the pulse",
+      "improving":  "your timing is improving",
+      "praise":     "good timing"
+    },
+    "posture": {
+      "leaning":       "sit up straight — keep your back tall",
+      "shoulderHigh":  "relax your shoulder",
+      "improving":     "better posture",
+      "praise":        "good posture"
+    },
+    "general": {
+      "breath":       "take a breath — you've got this",
+      "slowDown":     "let's slow this down",
+      "celebrate5":   "5 in a row — great work",
+      "celebrate10":  "10 in a row — you're on a roll",
+      "betterThanLast": "that was better than your last attempt",
+      "holdFeedback": "keep going",
+      "tooQuiet":     "play a little louder — mic isn't picking you up clearly",
+      "noSignal":     "can't hear you — check your microphone"
+    }
+  }
+}
