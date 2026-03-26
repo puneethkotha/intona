@@ -3988,6 +3988,10 @@ function _hydrateStartScreen() {
     } else if ((data.profile.totalSessions || 0) > 0) {
       contHint.textContent = `▶ Continue · session ${(data.profile.totalSessions || 0) + 1}`;
       contHint.hidden = false;
+      // Wire curriculum continue as a real button — was dead UI (no handler)
+      contHint.addEventListener('click', () => {
+        document.getElementById('btn-start').click();
+      });
     }
   }
 
@@ -3998,13 +4002,11 @@ function _hydrateStartScreen() {
     recHint.hidden = false;
   }
 
-  // Pieces section
-  if (data.pieces && data.pieces.length) {
-    const sec = document.getElementById('pieces-section');
-    if (sec) {
-      PieceManager.render(data.pieces);
-      sec.hidden = false;
-    }
+  // Pieces section — always visible so "Add piece" is always discoverable
+  const sec = document.getElementById('pieces-section');
+  if (sec) {
+    PieceManager.render(data.pieces || []);
+    sec.hidden = false;
   }
 
   // Update lastSeenAt
@@ -4046,17 +4048,30 @@ document.getElementById('btn-start').addEventListener('click', async () => {
       QA.warn('Audio pipeline init failed: ' + err.message);
     });
 
-    // Step 6: run calibration (noise floor + D4 pitch collection)
-    // When complete — or timed out — _finalize() sets toleranceCents.
-    // skip() sets _cancelled = true and calls enterApp() directly,
-    // so the .then() guard prevents a double-call to enterApp().
-    Calibration.run()
-      .then(() => { if (!Calibration._cancelled) enterApp(); })
-      .catch(err => {
-        QA.warn('Calibration error — using defaults: ' + err.message);
-        Calibration.skip();
-        enterApp();
-      });
+    // Step 6: run calibration — or skip if stored calibration is fresh (<20h old).
+    // Returning users who calibrated yesterday should not have to repeat it.
+    const storedCalib = Storage.load();
+    const calibAge    = storedCalib && storedCalib.calibration && storedCalib.calibration.calibratedAt
+      ? Date.now() - new Date(storedCalib.calibration.calibratedAt).getTime()
+      : Infinity;
+
+    if (calibAge < 20 * 60 * 60 * 1000) {
+      // Fresh calibration — apply stored values and skip straight to session
+      AppState.calib.toleranceCents = storedCalib.calibration.toleranceCents;
+      AppState.calib.noiseFloor     = storedCalib.calibration.noiseFloor;
+      AppState.calib.variance       = storedCalib.calibration.variance;
+      document.getElementById('calibration-screen').hidden = true;
+      enterApp();
+    } else {
+      // Calibration needed — run normally
+      Calibration.run()
+        .then(() => { if (!Calibration._cancelled) enterApp(); })
+        .catch(err => {
+          QA.warn('Calibration error — using defaults: ' + err.message);
+          Calibration.skip();
+          enterApp();
+        });
+    }
 
   } catch (err) {
     // initCamera() threw — QA.block() already called, just re-enable button
