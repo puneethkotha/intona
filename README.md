@@ -1,6 +1,6 @@
 # Intona
 
-Real-time practice coach for pitch, timing, and bow control — runs entirely in the browser.
+Real-time practice coach for pitch, timing, and bow control - runs entirely in the browser.
 
 ![Intona demo](./assets/demo.gif)
 
@@ -20,9 +20,9 @@ Real-time practice coach for pitch, timing, and bow control — runs entirely in
 ## How it works
 
 - **Pitch detection:** [Pitchy v4](https://github.com/ianprime0509/pitchy) (McLeod algorithm) via Web Audio API
-- **Pose/bow tracking:** [MediaPipe Tasks Vision v0.10.14](https://developers.google.com/mediapipe) — optional, camera only
-- **Session engine:** Phase-based state machine (warmup → drill → scale → performance)
-- **Drill engine:** WAITING → ATTEMPT → ANALYZING → FEEDBACK_HOLD loop, exits after sufficient clean reps
+- **Pose/bow tracking:** [MediaPipe Tasks Vision v0.10.14](https://developers.google.com/mediapipe) - optional, camera only
+- **Session engine:** Phase-based state machine (warmup - drill - scale - performance)
+- **Drill engine:** WAITING - ATTEMPT - ANALYZING - FEEDBACK_HOLD loop, exits after sufficient clean reps
 - **Storage:** Single `localStorage` key (`intona_v1`), JSON blob, schema-versioned
 - **No backend. No build step.** One HTML file + one JSON curriculum file.
 
@@ -60,7 +60,7 @@ Enable Pages on the `main` branch root. Works without modification.
 
 1. Open the app and grant microphone access when prompted
 2. Complete a short calibration (play and hold D4)
-3. Follow the on-screen drill prompts — play the note shown, hold it steady
+3. Follow the on-screen drill prompts - play the note shown, hold it steady
 4. Session summary and progress are saved automatically at the end
 
 Calibration is skipped automatically if completed within the last 20 hours.
@@ -72,9 +72,9 @@ Calibration is skipped automatically if completed within the last 20 hours.
 | | |
 |---|---|
 | ![Start screen](./assets/start.png) | ![Practice screen](./assets/practice.png) |
-| Start screen — returning user with streak and piece shortcuts | Practice screen — target note, live pitch feedback, cents error |
+| Start screen - returning user with streak and piece shortcuts | Practice screen - target note, live pitch feedback, cents error |
 | ![Piece practice](./assets/piece.png) | ![Session summary](./assets/summary.png) |
-| Piece practice — custom note sequence as hold drills | Session summary — score, streak, and skill recommendation |
+| Piece practice - custom note sequence as hold drills | Session summary - score, streak, and skill recommendation |
 
 ---
 
@@ -82,7 +82,7 @@ Calibration is skipped automatically if completed within the last 20 hours.
 
 Add a piece by pasting a note sequence in the Pieces section on the start screen.
 
-**Note format:** `NOTE[xDURATION][~]` — duration in beats (default 1), `~` marks a tie, `R` for rest.
+**Note format:** `NOTE[xDURATION][~]` - duration in beats (default 1), `~` marks a tie, `R` for rest.
 
 ```json
 {
@@ -114,7 +114,7 @@ Requires HTTPS in production. `localhost` works without it.
 - Camera is optional. The app works fully with microphone only.
 - If MediaPipe fails to load, the app continues with audio-only coaching.
 - All data is local. Clearing browser storage resets progress.
-- The curriculum (`notes.json`) must be served alongside `index.html` — it is not embedded.
+- The curriculum (`notes.json`) must be served alongside `index.html` - it is not embedded.
 
 ---
 
