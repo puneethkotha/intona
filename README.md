@@ -2,18 +2,7 @@
 
 Real-time practice coach for pitch, timing, and bow control — runs entirely in the browser.
 
----
-
-## Demo
-
 ![Intona demo](./assets/demo.gif)
-
-| | |
-|---|---|
-| ![Start screen](./assets/start.png) | ![Practice screen](./assets/practice.png) |
-| Start screen — returning user with streak and piece shortcuts | Practice screen — target note, live pitch feedback, cents error |
-| ![Piece practice](./assets/piece.png) | ![Session summary](./assets/summary.png) |
-| Piece practice — custom note sequence as hold drills | Session summary — score, streak, and skill recommendation |
 
 ---
 
@@ -75,6 +64,17 @@ Enable Pages on the `main` branch root. Works without modification.
 4. Session summary and progress are saved automatically at the end
 
 Calibration is skipped automatically if completed within the last 20 hours.
+
+---
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Start screen](./assets/start.png) | ![Practice screen](./assets/practice.png) |
+| Start screen — returning user with streak and piece shortcuts | Practice screen — target note, live pitch feedback, cents error |
+| ![Piece practice](./assets/piece.png) | ![Session summary](./assets/summary.png) |
+| Piece practice — custom note sequence as hold drills | Session summary — score, streak, and skill recommendation |
 
 ---
 
