@@ -2009,10 +2009,17 @@ const SessionEngine = {
     );
     // Piece mode: resume from lastPracticedIndex (set by PieceManager.startPiece)
     if (AppState._pieceMode.enabled) {
+      _skipWarmup = false;  // pieces have no warmup phase — flag irrelevant
       const resumeIndex = AppState.session.drillIndex;
       this._loadPhase(0);
       if (resumeIndex > 0) this._loadDrill(resumeIndex);
+    } else if (_skipWarmup && SESSION_TEMPLATE[0] && SESSION_TEMPLATE[0].phase === 'warmup') {
+      // Returning user chose "Jump to Practice" — skip warmup, go to first drill phase
+      _skipWarmup = false;
+      const firstPracticePhase = SESSION_TEMPLATE.findIndex(p => p.phase !== 'warmup');
+      this._loadPhase(firstPracticePhase > 0 ? firstPracticePhase : 0);
     } else {
+      _skipWarmup = false;
       this._loadPhase(0);
     }
   },
@@ -3505,6 +3512,7 @@ const Storage = {
    from piece notes, routes SessionEngine through it.
 ================================================================ */
 let _savedSessionTemplate = null;  // saved during piece mode, restored on reset
+let _skipWarmup           = false;  // set by returning-user "Jump to Practice"; consumed once in SessionEngine.start()
 
 const PieceManager = {
 
@@ -3731,14 +3739,14 @@ function _resetSession() {
   AppState.motivator.celebrating    = false;
   AppState.motivator.lastPraiseTime = 0;   // M16 fix: allow praise from the first rep
 
-  // --- Piece mode cleanup ---
-  // Restore original SESSION_TEMPLATE if piece mode was active
+  // --- Piece mode + skip-warmup cleanup ---
   if (_savedSessionTemplate) {
-    SESSION_TEMPLATE       = _savedSessionTemplate;
-    _savedSessionTemplate  = null;
+    SESSION_TEMPLATE      = _savedSessionTemplate;
+    _savedSessionTemplate = null;
   }
-  AppState._pieceMode        = { enabled: false, piece: null };
+  AppState._pieceMode         = { enabled: false, piece: null };
   AppState._syntheticTemplate = null;
+  _skipWarmup                 = false;
 
   // --- Adaptive difficulty ---
   AppState.difficulty.bpm              = CONFIG.bpmStart;
@@ -3953,14 +3961,16 @@ function _hydrateStartScreen() {
     panel.hidden = false;
   }
 
-  // Crash/refresh resume — currentSession was not cleared, offer to resume
-  const contHint = document.getElementById('continue-hint');
+  const contHint      = document.getElementById('continue-hint');
+  const totalSessions = data.profile.totalSessions || 0;
+  const hasCalib      = !!(data.calibration && data.calibration.calibratedAt);
+
   if (contHint && data.currentSession) {
+    // ---- Crash/refresh resume: session was interrupted ----
     const cs = data.currentSession;
-    const resumeLabel = cs.mode === 'piece' && cs.pieceId
+    contHint.textContent = (cs.mode === 'piece' && cs.pieceId)
       ? `▶ Resume piece (note ${cs.drillIndex + 1})`
       : `▶ Resume session`;
-    contHint.textContent = resumeLabel;
     contHint.hidden = false;
     contHint.addEventListener('click', () => {
       const stored = Storage.load();
@@ -3971,25 +3981,38 @@ function _hydrateStartScreen() {
           piece.lastPracticedIndex = stored.currentSession.drillIndex || 0;
           PieceManager.startPiece(piece);
         }
+      } else {
+        _skipWarmup = true;  // resuming curriculum — skip warmup
       }
       document.getElementById('btn-start').click();
     });
-  } else if (contHint && data.recommendation) {
-    // No crash session — show recommendation-based continue hint
-    if (data.recommendation.type === 'piece' && data.recommendation.target) {
-      contHint.textContent = `▶ Continue: ${data.recommendation.message}`;
+
+  } else if (contHint && (totalSessions > 0 || hasCalib)) {
+    // ---- Normal return: determine routing by lastMode then recommendation ----
+    // Requirement: if lastMode was 'piece' → go to that piece + last index
+    //              otherwise → jump to first drill phase (skip warmup)
+    const lastPieceId = (data.profile.lastMode === 'piece') ? data.profile.lastPieceId : null;
+    const recPieceId  = (data.recommendation && data.recommendation.type === 'piece')
+                          ? data.recommendation.target : null;
+    const targetPieceId = lastPieceId || recPieceId;
+    const targetPiece   = targetPieceId
+      ? (data.pieces || []).find(p => p.id === targetPieceId)
+      : null;
+
+    if (targetPiece) {
+      // Piece routing — resume from piece's last practiced position
+      contHint.textContent = `▶ Continue "${targetPiece.title}"`;
       contHint.hidden = false;
       contHint.addEventListener('click', () => {
-        const stored = Storage.load();
-        if (!stored) return;
-        const piece = stored.pieces.find(p => p.id === data.recommendation.target);
-        if (piece) { PieceManager.startPiece(piece); document.getElementById('btn-start').click(); }
+        PieceManager.startPiece(targetPiece);  // sets lastPracticedIndex, tempoScale, template
+        document.getElementById('btn-start').click();
       });
-    } else if ((data.profile.totalSessions || 0) > 0) {
-      contHint.textContent = `▶ Continue · session ${(data.profile.totalSessions || 0) + 1}`;
+    } else {
+      // Curriculum routing — skip warmup, go straight to drill phase
+      contHint.textContent = `▶ Jump to Practice · session ${totalSessions + 1}`;
       contHint.hidden = false;
-      // Wire curriculum continue as a real button — was dead UI (no handler)
       contHint.addEventListener('click', () => {
+        _skipWarmup = true;
         document.getElementById('btn-start').click();
       });
     }
