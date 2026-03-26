@@ -2955,9 +2955,9 @@ const UIRenderer = {
     const ctx    = canvas.getContext('2d');
     const W = canvas.width;
     const H = canvas.height;
-    if (!poseResult || !poseResult.landmarks || !poseResult.landmarks.length) return;
-
     ctx.clearRect(0, 0, W, H);
+
+    if (!poseResult || !poseResult.landmarks || !poseResult.landmarks.length) return;
 
     const lm = poseResult.landmarks[0];
 
