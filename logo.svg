@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Erhu bow arc -->
+  <path d="M 15 58 A 15 15 0 0 1 45 58" fill="none" stroke="#5DCAA5" stroke-width="7" stroke-linecap="round"/>
+  <!-- String line -->
+  <line x1="30" y1="58" x2="85" y2="58" stroke="#5DCAA5" stroke-width="7" stroke-linecap="round"/>
+</svg>
