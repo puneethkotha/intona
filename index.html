@@ -731,7 +731,7 @@
     <!-- Phase-2 progress bar: fills as D4 samples accumulate -->
     <div id="calib-progress"><div id="calib-progress-fill"></div></div>
     <div class="calib-status" id="calib-status">Waiting for signal…</div>
-    <button id="btn-skip-calib">Skip — use defaults</button>
+    <button id="btn-skip-calib" hidden>Skip — use defaults</button>
   </div>
 </div>
 
@@ -2955,9 +2955,9 @@ const UIRenderer = {
     const ctx    = canvas.getContext('2d');
     const W = canvas.width;
     const H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-
     if (!poseResult || !poseResult.landmarks || !poseResult.landmarks.length) return;
+
+    ctx.clearRect(0, 0, W, H);
 
     const lm = poseResult.landmarks[0];
 
@@ -3937,7 +3937,8 @@ function enterApp() {
   // Initialise MediaPipe CV pipeline (M6).
   // Non-blocking: runs in background; sets AppState.status.mediapipeOk when ready.
   // Fast loop gates CV calls on mediapipeOk, so no race condition.
-  CVPipeline.init();  // errors handled inside — QA.block() on failure
+  // Init MediaPipe if not already loaded (normally pre-loaded during calibration)
+  if (!AppState.status.mediapipeOk) CVPipeline.init();
 }
 
 
@@ -4072,6 +4073,16 @@ document.getElementById('btn-start').addEventListener('click', async () => {
     document.getElementById('start-screen').hidden      = true;
     document.getElementById('calibration-screen').hidden = false;
     AppState.lifecycle = 'calibrating';
+
+    // Start loading MediaPipe in background while user calibrates.
+    // Reveal skip button only when models are ready so the skeleton
+    // is guaranteed to be active the moment they enter the practice screen.
+    CVPipeline.init().then(() => {
+      document.getElementById('btn-skip-calib').hidden = false;
+    }).catch(() => {
+      // MediaPipe failed — still allow skip, session runs audio-only
+      document.getElementById('btn-skip-calib').hidden = false;
+    });
 
     // Step 5: init audio pipeline (imports Pitchy, wires AnalyserNode)
     // Must happen after initMic() has created AudioPipeline.audioCtx.
