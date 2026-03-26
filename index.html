@@ -2043,7 +2043,9 @@ const SessionEngine = {
       scale:       'Scale — play through the sequence',
       performance: 'Performance — full run through',
     };
-    AppState.feedback.message = phaseLabels[phase.phase] || phase.label || phase.phase;
+    AppState.feedback.message = phaseIndex === 0
+      ? 'Play the note shown and hold it steady'
+      : (phaseLabels[phase.phase] || phase.label || phase.phase);
     AppState.feedback.color   = 'var(--teal)';  // teal flash on phase entry; overwritten by first coaching message
 
     this._loadDrill(0);
@@ -2197,6 +2199,11 @@ const DrillEngine = {
         if (now < D.feedbackHoldUntil) break;  // still waiting
 
         if (D.cleanReps >= D.requiredCleanReps) {
+          D.state = 'ADVANCING';
+        } else if (D.repCount >= 6) {
+          // Escape: 6 attempts without enough clean reps — move on rather than frustrate
+          AppState.feedback.message = "Let's come back to this one later";
+          AppState.feedback.color   = 'var(--teal)';
           D.state = 'ADVANCING';
         } else {
           D.state = 'WAITING';   // loop — try again
@@ -2492,7 +2499,7 @@ const FeedbackSelector = {
       // Beyond 2× tolerance = wrong note territory; streak ≥ 3 = aim is unstable.
       if (cents === null)                           return m.unstable;
       if (Math.abs(cents) > t * 2)                 return m.wildlyOff;
-      if (streak >= 3)                             return m.unstable;
+      if (streak >= 3)                             return (m.unstable || '') + ' — try the ▶ button below';
       if (Math.abs(cents) <= CONFIG.slightlyOffCents) return null;  // close enough — stay quiet
       return cents > 0 ? m.slightlySharp : m.slightlyFlat;
     }
