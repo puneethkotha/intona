@@ -491,6 +491,126 @@
     }
     #btn-recalibrate:hover { color: var(--text); border-color: rgba(255,255,255,0.35); }
 
+    /* ---- RETURNING USER PANEL (start screen) ---- */
+    #returning-panel {
+      margin-top: 20px; width: 100%; max-width: 320px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .streak-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--text);
+    }
+    .streak-flame { font-size: 18px; }
+    .streak-count { font-weight: 500; }
+    .streak-label { color: var(--text-dim); }
+    #continue-hint {
+      font-size: 12px; color: var(--teal);
+      padding: 6px 10px; border: 0.5px solid var(--teal);
+      border-radius: 5px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    #continue-hint:hover { background: rgba(77,208,196,0.08); }
+    #recommendation-hint {
+      font-size: 11px; color: var(--text-dim); line-height: 1.5;
+    }
+
+    /* ---- PIECES SECTION (start screen) ---- */
+    #pieces-section {
+      margin-top: 16px; width: 100%; max-width: 320px;
+    }
+    .pieces-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .pieces-title { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+    #btn-add-piece {
+      font-size: 11px; color: var(--teal);
+      background: transparent; border: 0.5px solid var(--teal);
+      border-radius: 4px; padding: 3px 8px; cursor: pointer;
+      font-family: var(--font); transition: background 0.15s;
+    }
+    #btn-add-piece:hover { background: rgba(77,208,196,0.08); }
+    .piece-card {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; margin-bottom: 4px;
+      background: rgba(255,255,255,0.04);
+      border: 0.5px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+    }
+    .piece-card-left { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+    .piece-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .piece-meta  { font-size: 10px; color: var(--text-dim); }
+    .piece-status {
+      font-size: 9px; padding: 2px 6px; border-radius: 3px;
+      font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+      margin-left: 6px; flex-shrink: 0;
+    }
+    .piece-status.new         { background: rgba(77,208,196,0.15); color: var(--teal); }
+    .piece-status.in_progress { background: rgba(255,180,0,0.15);  color: var(--amber); }
+    .piece-status.stable      { background: rgba(255,255,255,0.08); color: var(--text-dim); }
+    .piece-actions { display: flex; gap: 4px; margin-left: 8px; }
+    .btn-piece-practice {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--teal); color: #111; border: none;
+      cursor: pointer; font-family: var(--font); font-weight: 500;
+    }
+    .btn-piece-delete {
+      font-size: 11px; padding: 3px 6px; border-radius: 4px;
+      background: transparent; color: var(--text-dim);
+      border: 0.5px solid rgba(255,255,255,0.15); cursor: pointer;
+      font-family: var(--font); transition: color 0.15s;
+    }
+    .btn-piece-delete:hover { color: var(--red); }
+
+    /* ---- ADD PIECE MODAL ---- */
+    #add-piece-modal {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 300; padding: 24px;
+    }
+    .modal-inner {
+      max-width: 340px; width: 100%;
+      background: #1a1a1a; border: 0.5px solid rgba(255,255,255,0.12);
+      border-radius: 10px; padding: 24px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-inner h3 { font-size: 15px; font-weight: 500; color: var(--text); margin: 0; }
+    .modal-field { display: flex; flex-direction: column; gap: 4px; }
+    .modal-label { font-size: 11px; color: var(--text-dim); }
+    .modal-input {
+      background: rgba(255,255,255,0.06); border: 0.5px solid rgba(255,255,255,0.18);
+      border-radius: 5px; padding: 7px 10px; color: var(--text);
+      font-size: 12px; font-family: var(--font); outline: none;
+      transition: border-color 0.15s;
+    }
+    .modal-input:focus { border-color: var(--teal); }
+    .modal-hint { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+    .modal-tempo-row { display: flex; align-items: center; gap: 10px; }
+    .modal-tempo-val { font-size: 12px; color: var(--teal); min-width: 32px; }
+    input[type=range].tempo-slider {
+      flex: 1; accent-color: var(--teal); cursor: pointer;
+    }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #btn-save-piece {
+      background: var(--teal); color: #111; border: none;
+      border-radius: 5px; padding: 7px 16px; font-size: 12px;
+      font-weight: 500; cursor: pointer; font-family: var(--font);
+    }
+    #btn-cancel-piece {
+      background: transparent; color: var(--text-dim);
+      border: 0.5px solid rgba(255,255,255,0.18); border-radius: 5px;
+      padding: 7px 12px; font-size: 12px; cursor: pointer; font-family: var(--font);
+    }
+
+    /* ---- SUMMARY SCREEN ADDITIONS ---- */
+    #summary-streak {
+      font-size: 15px; color: var(--text);
+    }
+    #summary-recommendation {
+      font-size: 11px; color: var(--text-dim); line-height: 1.5;
+    }
+
     /* ---- ERROR OVERLAY — blocking failures (M10) ---- */
     #error-overlay {
       position: fixed; inset: 0;
@@ -534,9 +654,63 @@
     </div>
 
     <button id="btn-start">Start Practice</button>
+
+    <!-- Returning user: streak + continue + recommendation -->
+    <div id="returning-panel" hidden>
+      <div class="streak-row">
+        <span class="streak-flame">🔥</span>
+        <span class="streak-count" id="streak-count-val">0</span>
+        <span class="streak-label" id="streak-label-text">day streak</span>
+      </div>
+      <div id="continue-hint" hidden></div>
+      <div id="recommendation-hint" hidden></div>
+    </div>
+
+    <!-- Saved pieces -->
+    <div id="pieces-section" hidden>
+      <div class="pieces-header">
+        <span class="pieces-title">My Pieces</span>
+        <button id="btn-add-piece">＋ Add piece</button>
+      </div>
+      <div id="pieces-list"></div>
+    </div>
   </div>
 </div>
 
+
+<!-- ================================================================
+     ADD PIECE MODAL
+     Shown when user clicks "+ Add piece".
+================================================================ -->
+<div id="add-piece-modal" hidden>
+  <div class="modal-inner">
+    <h3>Add a piece</h3>
+
+    <div class="modal-field">
+      <label class="modal-label" for="piece-title-input">Title</label>
+      <input class="modal-input" id="piece-title-input" type="text" placeholder="Spring Moon" maxlength="60" />
+    </div>
+
+    <div class="modal-field">
+      <label class="modal-label" for="piece-notes-input">Note sequence</label>
+      <input class="modal-input" id="piece-notes-input" type="text" placeholder="D4 E4 F#4 G4 A4" />
+      <span class="modal-hint">Space-separated note names. Valid: D4 E4 F#4 G4 A4 B4 D5 E5.<br>Duration: add ×2 or ×4 suffix for longer notes (e.g. D4×2).</span>
+    </div>
+
+    <div class="modal-field">
+      <label class="modal-label">Tempo</label>
+      <div class="modal-tempo-row">
+        <input type="range" class="tempo-slider" id="piece-tempo-slider" min="40" max="120" step="2" value="50" />
+        <span class="modal-tempo-val" id="piece-tempo-val">50 bpm</span>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button id="btn-cancel-piece">Cancel</button>
+      <button id="btn-save-piece">Save piece</button>
+    </div>
+  </div>
+</div>
 
 <!-- ================================================================
      CALIBRATION SCREEN
@@ -584,6 +758,8 @@
     <h2>Session complete</h2>
     <div class="summary-score" id="summary-score-val">—</div>
     <div class="summary-sub"  id="summary-sub">—</div>
+    <div id="summary-streak" hidden></div>
+    <div id="summary-recommendation" hidden></div>
     <button id="btn-practice-again">Practice Again</button>
     <!-- M20: lightweight recalibration offer — useful when room or erhu changes -->
     <button id="btn-recalibrate">Recalibrate Mic</button>
@@ -969,6 +1145,10 @@ const AppState = {
     fps:          0,
     // lastFrameTs removed — was never written; FPS tracked via _fpsFrameCount/_fpsWindowStart
   },
+
+  _slowLoop:        null,  // setInterval handle for slow loop (cleared on session end / Practice Again)
+  _pieceMode:       { enabled: false, piece: null },
+  _syntheticTemplate: null,
 };
 
 
@@ -1476,9 +1656,17 @@ const Calibration = {
   // Abort an in-progress run() and apply defaults immediately.
   skip() {
     this._cancelled = true;
-    AppState.calib.toleranceCents = CONFIG.defaultToleranceCents;
-    AppState.calib.noiseFloor     = 0;
-    AppState.calib.variance       = 0;
+    // Use stored calibration if available — better than raw defaults
+    const stored = Storage.load();
+    if (stored && stored.calibration && stored.calibration.calibratedAt) {
+      AppState.calib.toleranceCents = stored.calibration.toleranceCents;
+      AppState.calib.noiseFloor     = stored.calibration.noiseFloor;
+      AppState.calib.variance       = stored.calibration.variance;
+    } else {
+      AppState.calib.toleranceCents = CONFIG.defaultToleranceCents;
+      AppState.calib.noiseFloor     = 0;
+      AppState.calib.variance       = 0;
+    }
     const ring = document.getElementById('calib-ring');
     if (ring) ring.classList.remove('listening');
   },
@@ -1496,6 +1684,8 @@ const Calibration = {
     AppState.calib.toleranceCents = this._deriveTolerance(
       variance, noiseFloor, AppState.calib.sessionCount
     );
+    // Persist calibration so next session skips re-measurement
+    Storage.saveCalibration();
   },
 
   _deriveTolerance(variance, noiseFloor, sessionCount) {
@@ -1811,7 +2001,20 @@ const SessionEngine = {
     }
     AppState.session.phaseIndex = 0;
     AppState.session.drillIndex = 0;
-    this._loadPhase(0);
+    // Record session start in storage for crash/refresh resume
+    Storage.saveSessionStart(
+      AppState._pieceMode.enabled ? 'piece' : 'curriculum',
+      AppState._pieceMode.enabled ? (AppState._pieceMode.piece && AppState._pieceMode.piece.id) : null,
+      AppState.session.drillIndex
+    );
+    // Piece mode: resume from lastPracticedIndex (set by PieceManager.startPiece)
+    if (AppState._pieceMode.enabled) {
+      const resumeIndex = AppState.session.drillIndex;
+      this._loadPhase(0);
+      if (resumeIndex > 0) this._loadDrill(resumeIndex);
+    } else {
+      this._loadPhase(0);
+    }
   },
 
   // Load a phase by index. Advances to next phase if index is out of bounds.
@@ -1882,8 +2085,31 @@ const SessionEngine = {
     AppState.feedback.message      = 'Session complete — great work today';
     AppState.feedback.color        = 'var(--teal)';
     saveSessionCount();
+
+    // Build session summary and persist to storage
+    const scores = {};
+    ['pitch','bow','rhythm','posture','finger'].forEach(s => {
+      scores[s] = AppState.skillTracks[s].score;
+    });
+    const sessionSummary = {
+      id:              's_' + Date.now(),
+      startedAt:       new Date().toISOString(),
+      durationMs:      0,  // not tracked per-session yet
+      phaseReached:    AppState.session.phase,
+      drillsCompleted: AppState.session.drillIndex,
+      cleanRepRate:    AppState.motivator.streak > 0
+                         ? Math.min(1, AppState.motivator.streak / 10)
+                         : 0,
+      scores,
+      mode:            AppState._pieceMode.enabled ? 'piece' : 'curriculum',
+      pieceId:         AppState._pieceMode.enabled
+                         ? (AppState._pieceMode.piece && AppState._pieceMode.piece.id) : null,
+      lastDrillIndex:  AppState.session.drillIndex,
+    };
+    const savedData = Storage.saveSession(sessionSummary);
+
     UIRenderer.updateOverlays();
-    UIRenderer.showSummary();   // M10: overlay with score + streak
+    UIRenderer.showSummary(savedData);   // pass saved data for streak display
   },
 };
 
@@ -2272,11 +2498,14 @@ const FeedbackSelector = {
     if (skill === 'rhythm') {
       // Prefer the drill-level stored latency (persists into FEEDBACK_HOLD)
       // over the frame-level value (reset to null during sustain/silent).
-      // APPROXIMATION: latency < 200ms = anticipating (early);
-      //                latency > 700ms = hesitating (late).
+      // Thresholds aligned with rhythmScore buckets in ScoringEngine:
+      //   < 200ms → anticipating early (score 90, but directionally wrong)
+      //   >= 400ms → hesitating late  (score 68 or 45 — actionable feedback)
+      // APPROXIMATION: 400ms boundary is heuristic; real musical pulse sense
+      // depends on tempo, which varies by drill BPM.
       const lat = AppState.drill.lastAttackLatencyMs ?? AppState.frame.attackLatencyMs;
-      if (lat !== null && lat < 200) return m.early;
-      if (lat !== null && lat > 700) return m.late;
+      if (lat !== null && lat < 200)  return m.early;
+      if (lat !== null && lat >= 400) return m.late;
       return streak >= 3 ? m.late : m.early;  // fallback: no attack data this rep
     }
 
@@ -2900,7 +3129,7 @@ const UIRenderer = {
 
   // Show the end-of-session summary overlay.
   // Computes a final score from the last window's skillTrack averages.
-  showSummary() {
+  showSummary(savedData) {
     const scores = Object.values(AppState.skillTracks)
       .map(t => t.score).filter(v => v !== null);
     const avg = scores.length
@@ -2917,6 +3146,21 @@ const UIRenderer = {
     else if (streak >= 1)  sub = `${streak} clean rep${streak > 1 ? 's' : ''} — keep it up`;
     else                   sub = 'Keep practicing — every session counts';
     document.getElementById('summary-sub').textContent = sub;
+
+    // Streak from persistent storage
+    if (savedData && savedData.profile) {
+      const days     = savedData.profile.streakDays || 0;
+      const streakEl = document.getElementById('summary-streak');
+      if (streakEl) {
+        streakEl.textContent = `🔥 ${days} day streak`;
+        streakEl.hidden      = false;
+      }
+      const recEl = document.getElementById('summary-recommendation');
+      if (recEl && savedData.recommendation && savedData.recommendation.message) {
+        recEl.textContent = savedData.recommendation.message;
+        recEl.hidden      = false;
+      }
+    }
 
     document.getElementById('summary-screen').hidden = false;
   },
@@ -3000,6 +3244,369 @@ function playRefTone(freq) {
     // AudioContext creation can fail if the page has no user gesture — safe to ignore
   }
 }
+
+/* ================================================================
+   MODULE 13 — STORAGE
+   Local-first persistence. One JSON blob in localStorage under 'intona_v1'.
+   All reads happen at page load. All writes happen at session end.
+   Try/catch on every operation — storage unavailable degrades silently.
+================================================================ */
+const STORAGE_KEY    = 'intona_v1';
+const STORAGE_VER    = 1;
+const SESSION_LIMIT  = 30;
+
+const Storage = {
+
+  // Returns the full stored data object, or null if unavailable/corrupt.
+  load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || data.version !== STORAGE_VER) {
+        // Version mismatch — clear and start fresh
+        localStorage.removeItem(STORAGE_KEY);
+        return null;
+      }
+      return data;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  // Atomically write the full data object.
+  save(data) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (_) {
+      // QuotaExceededError or SecurityError — degrade silently
+    }
+  },
+
+  // Returns a clean default data object for a first-time user.
+  defaultData() {
+    return {
+      version: STORAGE_VER,
+      profile: {
+        createdAt:         new Date().toISOString().slice(0,10),
+        lastSeenAt:        new Date().toISOString(),
+        streakDays:        0,
+        longestStreak:     0,
+        lastPracticeDate:  '',
+        totalPracticeDays: 0,
+        totalSessions:     0,
+        lastMode:          'curriculum',
+        lastPieceId:       null,
+      },
+      difficulty: {
+        bpm:          CONFIG.bpmDefault || 50,
+        noteRangeEnd: 2,
+      },
+      calibration: {
+        toleranceCents: CONFIG.defaultToleranceCents || 50,
+        noiseFloor:     0,
+        variance:       0,
+        calibratedAt:   null,
+      },
+      progress: {
+        pitch:   { rollingMean: null, lastScore: null, trend: null, n: 0, confidence: 0 },
+        rhythm:  { rollingMean: null, lastScore: null, trend: null, n: 0, confidence: 0 },
+        bow:     { rollingMean: null, lastScore: null, trend: null, n: 0, confidence: 0 },
+        posture: { rollingMean: null, lastScore: null, trend: null, n: 0, confidence: 0 },
+        finger:  { rollingMean: null, lastScore: null, trend: null, n: 0, confidence: 0 },
+      },
+      sessions:       [],
+      pieces:         [],
+      // sessionMeta: records start date to guard streak against midnight-spanning sessions
+      sessionMeta:    { startDate: '' },
+      // currentSession: set on session start, cleared on complete; enables crash/refresh resume
+      currentSession: null,
+      recommendation: {
+        type:    'curriculum',  // 'curriculum' | 'skill' | 'piece'
+        target:  null,          // skill name or pieceId depending on type
+        message: 'Complete your first session to start tracking progress.',
+      },
+    };
+  },
+
+  // Called at session start. Records start date and sets currentSession for crash resume.
+  saveSessionStart(mode, pieceId, drillIndex) {
+    let data = this.load() || this.defaultData();
+    const today = new Date().toISOString().slice(0, 10);
+    if (!data.sessionMeta) data.sessionMeta = { startDate: '' };
+    data.sessionMeta.startDate = today;
+    data.currentSession = {
+      startedAt:   new Date().toISOString(),
+      startDate:   today,
+      mode:        mode || 'curriculum',
+      pieceId:     pieceId || null,
+      drillIndex:  drillIndex || 0,
+      phaseIndex:  0,
+    };
+    this.save(data);
+  },
+
+  // Called from _onSessionComplete(). Updates profile, sessions, progress, recommendation.
+  saveSession(summary) {
+    let data = this.load() || this.defaultData();
+    // Use startDate recorded at session start to guard streak against midnight-spanning sessions
+    const today = (data.sessionMeta && data.sessionMeta.startDate)
+      || new Date().toISOString().slice(0, 10);
+
+    // --- Streak (once per calendar day, keyed by startDate) ---
+    const last = data.profile.lastPracticeDate;
+    if (last !== today) {
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      data.profile.streakDays       = (last === yesterday) ? data.profile.streakDays + 1 : 1;
+      data.profile.totalPracticeDays++;
+      data.profile.lastPracticeDate = today;
+    }
+    data.profile.longestStreak = Math.max(data.profile.longestStreak || 0, data.profile.streakDays);
+    data.profile.totalSessions++;
+    data.profile.lastSeenAt = new Date().toISOString();
+    data.profile.lastMode   = summary.mode || 'curriculum';
+    if (summary.pieceId) data.profile.lastPieceId = summary.pieceId;
+
+    // Clear crash-resume session
+    data.currentSession = null;
+    data.sessionMeta.startDate = '';
+
+    // --- Session ring (FIFO, max 30) ---
+    data.sessions.unshift(summary);
+    if (data.sessions.length > SESSION_LIMIT) data.sessions.length = SESSION_LIMIT;
+
+    // --- Skill progress: EMA + trend + confidence ---
+    const skills = ['pitch', 'bow', 'rhythm', 'posture', 'finger'];
+    skills.forEach(s => {
+      const score = summary.scores && summary.scores[s];
+      if (score === null || score === undefined) return;
+      const p = data.progress[s];
+      if (!p.confidence) p.confidence = 0;
+      p.lastScore = score;
+      const alpha = 2 / (Math.min(p.n + 1, 7) + 1);
+      p.rollingMean = p.rollingMean === null
+        ? score
+        : Math.round(p.rollingMean * (1 - alpha) + score * alpha);
+      const diff = p.rollingMean !== null ? score - p.rollingMean : 0;
+      p.trend      = diff > 3 ? 'up' : diff < -3 ? 'down' : 'flat';
+      p.n++;
+      // Confidence: 0→1 over 10 sessions; represents reliability of the rolling mean
+      p.confidence = Math.min(1, p.n / 10);
+    });
+
+    // --- Piece progress ---
+    if (summary.pieceId && AppState._pieceMode.enabled) {
+      const piece = data.pieces.find(p => p.id === summary.pieceId);
+      if (piece) {
+        piece.lastPracticedAt    = new Date().toISOString();
+        piece.lastPracticedIndex = summary.lastDrillIndex || 0;
+        piece.progress.recentAccuracy = summary.cleanRepRate
+          ? Math.round(summary.cleanRepRate * 100) : piece.progress.recentAccuracy;
+        piece.progress.bestAccuracy = Math.max(
+          piece.progress.bestAccuracy || 0,
+          piece.progress.recentAccuracy || 0
+        );
+        // Completion: fraction of piece notes reached
+        const totalNotes = piece.notes ? piece.notes.length : 1;
+        piece.progress.completion = Math.min(1,
+          (summary.lastDrillIndex || 0) / totalNotes
+        );
+        // Status progression
+        if (piece.progress.recentAccuracy >= 85) piece.status = 'stable';
+        else if (piece.status === 'new') piece.status = 'in_progress';
+      }
+    }
+
+    // --- Recommendation ---
+    data.recommendation = this._computeRecommendation(data);
+
+    // --- Difficulty state ---
+    data.difficulty.bpm          = AppState.difficulty.bpm;
+    data.difficulty.noteRangeEnd = AppState.difficulty.noteRangeEnd;
+
+    this.save(data);
+    return data;
+  },
+
+  // Save current calibration values to storage.
+  saveCalibration() {
+    let data = this.load() || this.defaultData();
+    data.calibration = {
+      toleranceCents: AppState.calib.toleranceCents,
+      noiseFloor:     AppState.calib.noiseFloor,
+      variance:       AppState.calib.variance,
+      calibratedAt:   new Date().toISOString(),
+    };
+    this.save(data);
+  },
+
+  // Upsert a piece (add or update by id).
+  savePiece(piece) {
+    let data = this.load() || this.defaultData();
+    const idx = data.pieces.findIndex(p => p.id === piece.id);
+    if (idx >= 0) data.pieces[idx] = piece;
+    else data.pieces.push(piece);
+    this.save(data);
+  },
+
+  // Remove a piece by id.
+  deletePiece(pieceId) {
+    let data = this.load() || this.defaultData();
+    data.pieces = data.pieces.filter(p => p.id !== pieceId);
+    if (data.profile.lastPieceId === pieceId) data.profile.lastPieceId = null;
+    this.save(data);
+  },
+
+  // Derive a simple recommendation from stored data.
+  // Rules: if a piece is in progress → continue it. else → focus lowest skill.
+  _computeRecommendation(data) {
+    // Piece in progress → continue it
+    if (data.profile.lastPieceId) {
+      const piece = data.pieces.find(p => p.id === data.profile.lastPieceId);
+      if (piece && piece.status !== 'stable') {
+        return {
+          type:    'piece',
+          target:  piece.id,
+          message: `Continue "${piece.title}" — ${Math.round((piece.progress.completion || 0) * 100)}% through`,
+        };
+      }
+    }
+
+    // Lowest-confidence skill with a score (confidence < 1 means still building baseline)
+    // then lowest rolling mean among confident skills
+    const skills = ['pitch', 'rhythm', 'posture', 'finger', 'bow'];
+    const withData = skills.filter(s => data.progress[s].rollingMean !== null);
+
+    if (withData.length) {
+      const weak = withData.sort((a, b) =>
+        data.progress[a].rollingMean - data.progress[b].rollingMean
+      )[0];
+      const p = data.progress[weak];
+      const trendNote = p.trend === 'down' ? ' — needs attention' : p.trend === 'up' ? ' — improving' : '';
+      return {
+        type:    'skill',
+        target:  weak,
+        message: `Focus on ${weak} (avg ${p.rollingMean}%${trendNote})`,
+      };
+    }
+
+    return {
+      type:    'curriculum',
+      target:  null,
+      message: 'Complete your first session to start tracking progress.',
+    };
+  },
+};
+
+/* ================================================================
+   MODULE 14 — PIECE MANAGER
+   Renders the pieces list on the start screen.
+   Handles piece practice mode: builds a synthetic SESSION_TEMPLATE
+   from piece notes, routes SessionEngine through it.
+================================================================ */
+let _savedSessionTemplate = null;  // saved during piece mode, restored on reset
+
+const PieceManager = {
+
+  // Render all pieces into #pieces-list.
+  render(pieces) {
+    const list = document.getElementById('pieces-list');
+    if (!list) return;
+
+    if (!pieces || !pieces.length) {
+      list.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:4px 0">No pieces saved yet.</div>';
+      return;
+    }
+
+    list.innerHTML = pieces.map(p => {
+      const lastDate = p.lastPracticedAt
+        ? new Date(p.lastPracticedAt).toLocaleDateString(undefined, { month:'short', day:'numeric' })
+        : 'not yet practiced';
+      const pct = Math.round((p.progress.completion || 0) * 100);
+      return `
+        <div class="piece-card" data-id="${p.id}">
+          <div class="piece-card-left">
+            <span class="piece-title">${this._esc(p.title)}</span>
+            <span class="piece-meta">${p.notes ? p.notes.length : 0} notes · ${lastDate} · ${pct}%</span>
+          </div>
+          <span class="piece-status ${p.status || 'new'}">${p.status || 'new'}</span>
+          <div class="piece-actions">
+            <button class="btn-piece-practice" data-id="${p.id}">Practice</button>
+            <button class="btn-piece-delete"   data-id="${p.id}">✕</button>
+          </div>
+        </div>`;
+    }).join('');
+  },
+
+  // Parse a space-separated note string like "D4 E4×2 R F#4~" into a notes array.
+  // Format per token: NOTE[×DURATION][~] where ~ = tie, R = rest
+  // Returns: { note, duration, type: 'note'|'rest', rest: bool, tie: bool }
+  parseNotes(str) {
+    const valid = new Set(['D4','E4','F#4','G4','A4','B4','D5','E5']);
+    return str.trim().split(/\s+/).filter(Boolean).map(tok => {
+      if (tok.toUpperCase() === 'R') {
+        return { note: null, duration: 1, type: 'rest', rest: true, tie: false };
+      }
+      const tie   = tok.endsWith('~');
+      const clean = tie ? tok.slice(0, -1) : tok;
+      const [noteRaw, durRaw] = clean.split('×');
+      const note  = noteRaw.trim();
+      if (!valid.has(note)) return null;
+      return { note, duration: durRaw ? parseInt(durRaw, 10) || 1 : 1, type: 'note', rest: false, tie };
+    }).filter(Boolean);
+  },
+
+  // Build a synthetic SESSION_TEMPLATE from a piece's notes array.
+  // Each note becomes a hold drill with requiredCleanReps=2.
+  buildTemplate(piece) {
+    if (!piece || !piece.notes || !piece.notes.length) return null;
+    const drills = piece.notes
+      .filter(n => n.type !== 'rest' && n.note)   // skip rest tokens
+      .map(n => ({
+        type:              'hold',
+        noteId:            n.note,
+        requiredCleanReps: 2,
+      }));
+    return [{
+      phase:           'piece',
+      scoringPressure: true,
+      drills,
+    }];
+  },
+
+  // Enter piece practice mode: swap SESSION_TEMPLATE, set BPM from piece tempo.
+  startPiece(piece) {
+    const template = this.buildTemplate(piece);
+    if (!template) return;
+
+    AppState._pieceMode       = { enabled: true, piece };
+    AppState._syntheticTemplate = template;
+
+    // Save original template so _resetSession can restore it
+    if (!_savedSessionTemplate) _savedSessionTemplate = SESSION_TEMPLATE;
+    SESSION_TEMPLATE = template;
+
+    // Apply piece tempo
+    if (piece.tempoScale) {
+      const base = CONFIG.bpmDefault || 50;
+      AppState.difficulty.bpm = Math.max(
+        CONFIG.bpmMin || 40,
+        Math.min(CONFIG.bpmMax || 120, Math.round(base * piece.tempoScale))
+      );
+    }
+
+    // Start from lastPracticedIndex
+    AppState.session.phaseIndex = 0;
+    AppState.session.drillIndex = Math.max(0,
+      Math.min((piece.lastPracticedIndex || 0), template[0].drills.length - 1)
+    );
+  },
+
+  // Escape HTML to prevent injection via piece titles
+  _esc(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  },
+};
 
 // ---- Fast loop (~60 fps via requestAnimationFrame) ----------------------
 // Drives AudioPipeline.tick() every frame during an active session.
@@ -3123,6 +3730,15 @@ function _resetSession() {
   AppState.motivator.message        = '';
   AppState.motivator.celebrating    = false;
   AppState.motivator.lastPraiseTime = 0;   // M16 fix: allow praise from the first rep
+
+  // --- Piece mode cleanup ---
+  // Restore original SESSION_TEMPLATE if piece mode was active
+  if (_savedSessionTemplate) {
+    SESSION_TEMPLATE       = _savedSessionTemplate;
+    _savedSessionTemplate  = null;
+  }
+  AppState._pieceMode        = { enabled: false, piece: null };
+  AppState._syntheticTemplate = null;
 
   // --- Adaptive difficulty ---
   AppState.difficulty.bpm              = CONFIG.bpmStart;
@@ -3309,6 +3925,96 @@ function enterApp() {
 }
 
 
+// ---- Hydrate start screen from storage ----
+// Called once on page load. Shows streak, last piece, and recommendation
+// if the user has stored data. Shows nothing on first visit.
+function _hydrateStartScreen() {
+  const data = Storage.load();
+  if (!data) return;  // first visit — show clean screen
+
+  // Hydrate AppState with stored calibration and difficulty
+  if (data.calibration && data.calibration.calibratedAt) {
+    AppState.calib.toleranceCents = data.calibration.toleranceCents;
+    AppState.calib.noiseFloor     = data.calibration.noiseFloor;
+    AppState.calib.variance       = data.calibration.variance;
+  }
+  if (data.difficulty) {
+    AppState.difficulty.bpm          = data.difficulty.bpm || AppState.difficulty.bpm;
+    AppState.difficulty.noteRangeEnd = data.difficulty.noteRangeEnd || AppState.difficulty.noteRangeEnd;
+  }
+
+  // Show returning panel
+  const panel = document.getElementById('returning-panel');
+  if (panel) {
+    const streakEl = document.getElementById('streak-count-val');
+    const labelEl  = document.getElementById('streak-label-text');
+    if (streakEl) streakEl.textContent = data.profile.streakDays || 0;
+    if (labelEl)  labelEl.textContent  = data.profile.streakDays === 1 ? 'day streak' : 'day streak';
+    panel.hidden = false;
+  }
+
+  // Crash/refresh resume — currentSession was not cleared, offer to resume
+  const contHint = document.getElementById('continue-hint');
+  if (contHint && data.currentSession) {
+    const cs = data.currentSession;
+    const resumeLabel = cs.mode === 'piece' && cs.pieceId
+      ? `▶ Resume piece (note ${cs.drillIndex + 1})`
+      : `▶ Resume session`;
+    contHint.textContent = resumeLabel;
+    contHint.hidden = false;
+    contHint.addEventListener('click', () => {
+      const stored = Storage.load();
+      if (!stored || !stored.currentSession) return;
+      if (stored.currentSession.mode === 'piece' && stored.currentSession.pieceId) {
+        const piece = stored.pieces.find(p => p.id === stored.currentSession.pieceId);
+        if (piece) {
+          piece.lastPracticedIndex = stored.currentSession.drillIndex || 0;
+          PieceManager.startPiece(piece);
+        }
+      }
+      document.getElementById('btn-start').click();
+    });
+  } else if (contHint && data.recommendation) {
+    // No crash session — show recommendation-based continue hint
+    if (data.recommendation.type === 'piece' && data.recommendation.target) {
+      contHint.textContent = `▶ Continue: ${data.recommendation.message}`;
+      contHint.hidden = false;
+      contHint.addEventListener('click', () => {
+        const stored = Storage.load();
+        if (!stored) return;
+        const piece = stored.pieces.find(p => p.id === data.recommendation.target);
+        if (piece) { PieceManager.startPiece(piece); document.getElementById('btn-start').click(); }
+      });
+    } else if ((data.profile.totalSessions || 0) > 0) {
+      contHint.textContent = `▶ Continue · session ${(data.profile.totalSessions || 0) + 1}`;
+      contHint.hidden = false;
+    }
+  }
+
+  // Recommendation hint
+  const recHint = document.getElementById('recommendation-hint');
+  if (recHint && data.recommendation && data.recommendation.message) {
+    recHint.textContent = data.recommendation.message;
+    recHint.hidden = false;
+  }
+
+  // Pieces section
+  if (data.pieces && data.pieces.length) {
+    const sec = document.getElementById('pieces-section');
+    if (sec) {
+      PieceManager.render(data.pieces);
+      sec.hidden = false;
+    }
+  }
+
+  // Update lastSeenAt
+  data.profile.lastSeenAt = new Date().toISOString();
+  Storage.save(data);
+}
+
+// Call immediately on page load
+_hydrateStartScreen();
+
 // ---- Start button ----
 document.getElementById('btn-start').addEventListener('click', async () => {
   const btn = document.getElementById('btn-start');
@@ -3365,6 +4071,105 @@ document.getElementById('btn-start').addEventListener('click', async () => {
 document.getElementById('btn-skip-calib').addEventListener('click', () => {
   Calibration.skip();
   enterApp();
+});
+
+// ---- Add piece button ----
+document.getElementById('btn-add-piece').addEventListener('click', () => {
+  document.getElementById('add-piece-modal').hidden = false;
+  document.getElementById('piece-title-input').value  = '';
+  document.getElementById('piece-notes-input').value  = '';
+  document.getElementById('piece-tempo-slider').value = '50';
+  document.getElementById('piece-tempo-val').textContent = '50 bpm';
+});
+
+// ---- Tempo slider live update ----
+document.getElementById('piece-tempo-slider').addEventListener('input', (e) => {
+  document.getElementById('piece-tempo-val').textContent = `${e.target.value} bpm`;
+});
+
+// ---- Cancel piece modal ----
+document.getElementById('btn-cancel-piece').addEventListener('click', () => {
+  document.getElementById('add-piece-modal').hidden = true;
+});
+
+// ---- Save piece ----
+document.getElementById('btn-save-piece').addEventListener('click', () => {
+  const title = document.getElementById('piece-title-input').value.trim();
+  const noteStr = document.getElementById('piece-notes-input').value.trim();
+  const bpm     = parseInt(document.getElementById('piece-tempo-slider').value, 10) || 50;
+
+  if (!title) {
+    document.getElementById('piece-title-input').focus();
+    return;
+  }
+
+  const notes = PieceManager.parseNotes(noteStr);
+  if (!notes.length) {
+    document.getElementById('piece-notes-input').focus();
+    return;
+  }
+
+  const piece = {
+    id:                 'piece_' + Date.now(),
+    title,
+    sourceType:         'manual',
+    notes,
+    tempoScale:         bpm / (CONFIG.bpmDefault || 50),
+    loopStart:          0,
+    loopEnd:            notes.length - 1,
+    createdAt:          new Date().toISOString(),
+    lastPracticedAt:    null,
+    lastPracticedIndex: 0,
+    status:             'new',
+    progress: {
+      completion:      0,
+      recentAccuracy:  0,
+      bestAccuracy:    0,
+      weakestSection:  null,
+    },
+  };
+
+  Storage.savePiece(piece);
+
+  // Re-render pieces list and show section
+  const stored = Storage.load();
+  if (stored) {
+    PieceManager.render(stored.pieces);
+    const sec = document.getElementById('pieces-section');
+    if (sec) sec.hidden = false;
+  }
+
+  document.getElementById('add-piece-modal').hidden = true;
+});
+
+// ---- Pieces list — delegated click handler for Practice and Delete ----
+document.getElementById('pieces-list').addEventListener('click', async (e) => {
+  const practiceBtn = e.target.closest('.btn-piece-practice');
+  const deleteBtn   = e.target.closest('.btn-piece-delete');
+
+  if (practiceBtn) {
+    const pieceId = practiceBtn.dataset.id;
+    const stored  = Storage.load();
+    if (!stored) return;
+    const piece = stored.pieces.find(p => p.id === pieceId);
+    if (!piece) return;
+    PieceManager.startPiece(piece);
+    // Trigger the normal Start Practice flow
+    document.getElementById('btn-start').click();
+  }
+
+  if (deleteBtn) {
+    const pieceId = deleteBtn.dataset.id;
+    Storage.deletePiece(pieceId);
+    const stored = Storage.load();
+    if (stored) {
+      PieceManager.render(stored.pieces);
+      if (!stored.pieces.length) {
+        const sec = document.getElementById('pieces-section');
+        if (sec) sec.hidden = true;
+      }
+    }
+  }
 });
 
 // ---- Retry after blocking error ----
