@@ -4,6 +4,19 @@ Real-time practice coach for pitch, timing, and bow control — runs entirely in
 
 ---
 
+## Demo
+
+![Intona demo](./assets/demo.gif)
+
+| | |
+|---|---|
+| ![Start screen](./assets/start.png) | ![Practice screen](./assets/practice.png) |
+| Start screen — returning user with streak and piece shortcuts | Practice screen — target note, live pitch feedback, cents error |
+| ![Piece practice](./assets/piece.png) | ![Session summary](./assets/summary.png) |
+| Piece practice — custom note sequence as hold drills | Session summary — score, streak, and skill recommendation |
+
+---
+
 ## What it does
 
 - Detects pitch from your microphone and gives immediate feedback on intonation
