@@ -625,6 +625,71 @@
     }
     .error-inner h2 { font-size: 18px; font-weight: 500; color: var(--red); }
     .error-inner p  { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+    /* ---- Positioning screen ---- */
+    #positioning-screen {
+      position: fixed; inset: 0; background: #000; z-index: 95;
+    }
+    #position-feed {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%; object-fit: cover;
+      transform: scaleX(-1);
+    }
+    #position-canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%; pointer-events: none;
+    }
+    #position-ui {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 24px; display: flex; flex-direction: column;
+      align-items: center; gap: 12px; z-index: 10;
+    }
+    #position-status {
+      font-size: 14px; color: var(--text);
+      background: rgba(0,0,0,0.80); padding: 10px 20px;
+      border-radius: 8px; text-align: center;
+    }
+    #position-actions { display: flex; gap: 12px; }
+    #btn-setup-check {
+      background: transparent; border: 1px solid rgba(255,255,255,0.22);
+      color: var(--text-dim); padding: 10px 20px; border-radius: 8px;
+      font-family: var(--font); font-size: 13px; cursor: pointer;
+    }
+    #btn-position-continue {
+      background: var(--teal); color: #111; border: none;
+      padding: 10px 24px; border-radius: 8px;
+      font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer;
+    }
+
+    /* ---- Setup check screen ---- */
+    #setup-screen {
+      position: fixed; inset: 0; background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 95;
+    }
+    .setup-inner {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 18px; max-width: 380px; text-align: center; padding: 40px;
+    }
+    #setup-step-label {
+      font-size: 11px; color: var(--text-dim);
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    #setup-instruction {
+      font-size: 17px; color: var(--text); line-height: 1.5;
+    }
+    #setup-countdown {
+      font-size: 52px; font-weight: 500; color: var(--teal);
+      min-height: 64px; line-height: 1;
+    }
+    #setup-feedback {
+      font-size: 13px; color: var(--text-dim); min-height: 20px;
+    }
+    #btn-setup-skip {
+      background: transparent; border: none;
+      color: var(--text-faint); font-family: var(--font);
+      font-size: 12px; cursor: pointer; margin-top: 4px;
+    }
+
     #btn-retry {
       background: var(--amber); color: #111;
       border: none; border-radius: 7px;
@@ -732,6 +797,38 @@
      Measures mic environment and sets pitch tolerance threshold.
      Logic implemented in Milestone 5.
 ================================================================ -->
+<!-- ================================================================
+     POSITIONING SCREEN
+     Shown after camera permission, before calibration.
+     Camera feed + silhouette overlay. Real pose detection confirms framing.
+================================================================ -->
+<div id="positioning-screen" hidden>
+  <video id="position-feed" autoplay playsinline muted></video>
+  <canvas id="position-canvas"></canvas>
+  <div id="position-ui">
+    <div id="position-status">Step into frame - align with the outline</div>
+    <div id="position-actions">
+      <button id="btn-setup-check">Check my setup (60 sec)</button>
+      <button id="btn-position-continue">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     SETUP CHECK SCREEN
+     Optional multi-step flow: pitch calibration + finger offsets.
+     Saves personalised measurements to localStorage.
+================================================================ -->
+<div id="setup-screen" hidden>
+  <div class="setup-inner">
+    <div id="setup-step-label"></div>
+    <div id="setup-instruction"></div>
+    <div id="setup-countdown"></div>
+    <div id="setup-feedback"></div>
+    <button id="btn-setup-skip">Skip this step</button>
+  </div>
+</div>
+
 <div id="calibration-screen" hidden>
   <div class="calib-inner">
     <h2>Calibrate</h2>
@@ -814,6 +911,7 @@
       <div id="note-badge">
         <div class="note-name" id="current-note-name">—</div>
         <div class="note-sub"  id="next-note-name">next: —</div>
+        <div class="note-sub"  id="hearing-note" style="color:var(--teal);margin-top:2px">hearing: —</div>
         <!-- M13: live pitch error bar — centre = in-tune; fills left (flat) / right (sharp) -->
         <div id="cents-bar">
           <div id="cents-center-tick"></div>
@@ -1024,7 +1122,7 @@ const CONFIG = {
   windowMs:            200,   // slow-loop evaluation window (ms)
 
   // --- Scoring thresholds ---
-  cleanRepThreshold:   72,    // window score >= this counts as a clean rep
+  cleanRepThreshold:   55,    // window score >= this counts as a clean rep (lowered for beginner accessibility)
   struggleThreshold:   45,    // window score <= this counts as struggling
   poorWindowsToChange: 3,     // consecutive poor windows before difficulty drops
   cleanWindowsToChange:3,     // consecutive clean windows before difficulty rises
@@ -1169,10 +1267,11 @@ const AppState = {
     // lastFrameTs removed — was never written; FPS tracked via _fpsFrameCount/_fpsWindowStart
   },
 
-  _slowLoop:        null,  // setInterval handle for slow loop (cleared on session end / Practice Again)
-  _pieceMode:       { enabled: false, piece: null },
-  _syntheticTemplate: null,
-  _dScaleMode:      false, // runtime mirror of stored dScale.enabled
+  _slowLoop:            null,  // setInterval handle for slow loop (cleared on session end / Practice Again)
+  _pieceMode:           { enabled: false, piece: null },
+  _syntheticTemplate:   null,
+  _dScaleMode:          false, // runtime mirror of stored dScale.enabled
+  _setupFingerOffsets:  null,  // measured per-finger wrist offsets from SetupCheck; null = use defaults
 };
 
 
@@ -1480,6 +1579,20 @@ function _median(arr) {
 function _hzToCents(hz, target) {
   if (!hz || !target) return 0;
   return 1200 * Math.log2(hz / target);
+}
+
+// Returns the name of the closest note in NOTES_BY_ID to the given Hz,
+// or null if no notes are loaded or hz is null.
+function _closestNoteFromHz(hz) {
+  if (!hz) return null;
+  const notes = Object.values(NOTES_BY_ID);
+  if (!notes.length) return null;
+  let best = null, bestDist = Infinity;
+  for (const n of notes) {
+    const dist = Math.abs(_hzToCents(hz, n.freq));
+    if (dist < bestDist) { bestDist = dist; best = n; }
+  }
+  return best ? best.name : null;
 }
 
 function _pitchVariance(arr) {
@@ -2693,6 +2806,11 @@ const UIRenderer = {
     // --- Note badge + drill-state indicator ---
     document.getElementById('current-note-name').textContent =
       S.scheduler.currentNote ? S.scheduler.currentNote.name : '—';
+
+    // Show what note is actually being detected — helps beginner know what they're playing
+    const _heardNote = _closestNoteFromHz(S.frame.detectedHz);
+    document.getElementById('hearing-note').textContent =
+      _heardNote ? `hearing: ${_heardNote}` : 'hearing: —';
 
     // M18: for hold drills in ATTEMPT/FEEDBACK_HOLD show rep progress;
     // otherwise show next-note name.  Gives the student a tangible target
@@ -3991,10 +4109,12 @@ function enterApp() {
     if (!poseLm || !poseLm[11]) return;
 
     const shoulderY = poseLm[11].y;
-    // Expected wrist Y offsets from shoulder per finger position (normalised coords)
-    // Negative = higher in frame (smaller Y). Approximation; tuned for typical seated posture.
-    const FINGER_OFFSETS = [-0.05, -0.12, -0.18, -0.24];
-    const expectedY  = shoulderY + (FINGER_OFFSETS[note.fingerIndex] || -0.05);
+    // Use measured offsets from setup check if available, otherwise fall back to defaults
+    const DEFAULT_OFFSETS = [-0.05, -0.12, -0.18, -0.24];
+    const measured = AppState._setupFingerOffsets;
+    const FINGER_OFFSETS = (measured && measured.some(v => v !== null)) ? measured : DEFAULT_OFFSETS;
+    const rawOffset = FINGER_OFFSETS[note.fingerIndex];
+    const expectedY = shoulderY + (rawOffset !== null && rawOffset !== undefined ? rawOffset : DEFAULT_OFFSETS[note.fingerIndex] || -0.05);
     const tolerance  = 0.07;
     const actualY    = wrist.y;
 
@@ -4150,6 +4270,14 @@ function _hydrateStartScreen() {
     sec.hidden = false;
   }
 
+  // Restore setup check measurements
+  if (data.setup && data.setup.fingerOffsets) {
+    AppState._setupFingerOffsets = data.setup.fingerOffsets;
+  }
+  if (data.setup && data.setup.toleranceCents) {
+    AppState.calib.toleranceCents = data.setup.toleranceCents;
+  }
+
   // D-scale mode: restore toggle state from storage
   if (data.dScale && data.dScale.enabled) {
     AppState._dScaleMode = true;
@@ -4161,6 +4289,332 @@ function _hydrateStartScreen() {
   data.profile.lastSeenAt = new Date().toISOString();
   Storage.save(data);
 }
+
+// ================================================================
+//  POSITIONING SCREEN
+//  Shows camera feed + seated erhu player silhouette.
+//  Uses real MediaPipe pose detection to confirm framing.
+//  Falls back to manual confirm if MediaPipe not ready yet.
+// ================================================================
+const PositioningScreen = {
+  _rafId:        null,
+  _alignedSince: null,
+  _onDone:       null,   // called with 'continue' or 'setup'
+
+  show(stream, onDone) {
+    this._onDone       = onDone;
+    this._alignedSince = null;
+
+    const video  = document.getElementById('position-feed');
+    video.srcObject = stream;
+    video.play().catch(() => {});
+
+    document.getElementById('positioning-screen').hidden = false;
+    this._loop();
+  },
+
+  hide() {
+    if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    document.getElementById('positioning-screen').hidden = true;
+    const video = document.getElementById('position-feed');
+    video.srcObject = null;
+  },
+
+  _loop() {
+    this._rafId = requestAnimationFrame(() => this._loop());
+    const video  = document.getElementById('position-feed');
+    const canvas = document.getElementById('position-canvas');
+    const ctx    = canvas.getContext('2d');
+    canvas.width  = video.videoWidth  || window.innerWidth;
+    canvas.height = video.videoHeight || window.innerHeight;
+    const W = canvas.width, H = canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+    this._drawSilhouette(ctx, W, H);
+
+    // If MediaPipe not loaded yet, allow manual continue only
+    if (!AppState.status.mediapipeOk || !CVPipeline.poseLandmarker || video.readyState < 2) {
+      this._setStatus('Camera loading - you can continue manually');
+      this._alignedSince = null;
+      return;
+    }
+
+    const result = CVPipeline.poseLandmarker.detectForVideo(video, performance.now());
+    if (!result.landmarks || !result.landmarks.length) {
+      this._setStatus('Step into frame - align with the outline');
+      this._alignedSince = null;
+      return;
+    }
+
+    const lm       = result.landmarks[0];
+    const nose     = lm[0];
+    const lShoulder = lm[11];
+    const rShoulder = lm[12];
+
+    if (!nose || !lShoulder || !rShoulder ||
+        (nose.visibility     || 0) < 0.5 ||
+        (lShoulder.visibility || 0) < 0.4 ||
+        (rShoulder.visibility || 0) < 0.4) {
+      this._setStatus('Step into frame - align with the outline');
+      this._alignedSince = null;
+      return;
+    }
+
+    const span = Math.abs(rShoulder.x - lShoulder.x);
+
+    if (nose.x < 0.3)   { this._setStatus('Move a bit to the right'); this._alignedSince = null; return; }
+    if (nose.x > 0.7)   { this._setStatus('Move a bit to the left');  this._alignedSince = null; return; }
+    if (span < 0.15)    { this._setStatus('Move a bit closer');        this._alignedSince = null; return; }
+    if (span > 0.55)    { this._setStatus('Move a bit further back');  this._alignedSince = null; return; }
+
+    const now = Date.now();
+    if (!this._alignedSince) this._alignedSince = now;
+    const held = now - this._alignedSince;
+
+    this._setStatus(held >= 1000 ? 'You\'re in frame - ready!' : 'Hold still...');
+
+    if (held >= 1800 && this._onDone) {
+      const cb = this._onDone; this._onDone = null;
+      this.hide();
+      cb('continue');
+    }
+  },
+
+  _setStatus(msg) {
+    const el = document.getElementById('position-status');
+    if (el && el.textContent !== msg) el.textContent = msg;
+  },
+
+  // Draws a faint seated erhu player outline as a positioning guide.
+  // Pure canvas drawing - no detection, always visible.
+  _drawSilhouette(ctx, W, H) {
+    const cx     = W * 0.5;
+    const headR  = W * 0.038;
+    const headY  = H * 0.20;
+    const shY    = headY + H * 0.10;
+    const shSpan = W * 0.18;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(93,202,165,0.22)';
+    ctx.lineWidth   = 2;
+    ctx.lineCap     = 'round';
+    ctx.setLineDash([5, 5]);
+
+    // Head
+    ctx.beginPath();
+    ctx.arc(cx, headY, headR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Shoulders arc
+    ctx.beginPath();
+    ctx.moveTo(cx - shSpan, shY);
+    ctx.quadraticCurveTo(cx, shY - H * 0.025, cx + shSpan, shY);
+    ctx.stroke();
+
+    // Torso sides
+    const torsoBot = shY + H * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(cx - W * 0.09, shY + H * 0.01);
+    ctx.lineTo(cx - W * 0.11, torsoBot);
+    ctx.moveTo(cx + W * 0.09, shY + H * 0.01);
+    ctx.lineTo(cx + W * 0.11, torsoBot);
+    ctx.stroke();
+
+    // Left (finger) arm - angled up toward neck
+    ctx.beginPath();
+    ctx.moveTo(cx - shSpan, shY);
+    ctx.lineTo(cx - W * 0.23, shY + H * 0.07);
+    ctx.lineTo(cx - W * 0.16, shY + H * 0.18);
+    ctx.stroke();
+
+    // Right (bow) arm - extends to the right
+    ctx.beginPath();
+    ctx.moveTo(cx + shSpan, shY);
+    ctx.lineTo(cx + W * 0.30, shY + H * 0.05);
+    ctx.lineTo(cx + W * 0.35, shY + H * 0.13);
+    ctx.stroke();
+
+    // Erhu body (thin vertical rectangle, center chest)
+    const erhuX = cx - W * 0.018;
+    const erhuW = W * 0.036;
+    const erhuT = shY + H * 0.02;
+    const erhuH = H * 0.24;
+    ctx.strokeRect(erhuX, erhuT, erhuW, erhuH);
+
+    // Two strings
+    ctx.beginPath();
+    ctx.moveTo(erhuX + erhuW * 0.33, erhuT);
+    ctx.lineTo(erhuX + erhuW * 0.33, erhuT + erhuH);
+    ctx.moveTo(erhuX + erhuW * 0.67, erhuT);
+    ctx.lineTo(erhuX + erhuW * 0.67, erhuT + erhuH);
+    ctx.stroke();
+
+    ctx.restore();
+  },
+};
+
+// ================================================================
+//  SETUP CHECK
+//  Measures finger offsets and pitch tolerance from real playing.
+//  Saves to localStorage.setup. Session reads these instead of
+//  hardcoded defaults.
+// ================================================================
+const SetupCheck = {
+  _resolve:    null,
+  _skipFlag:   false,
+
+  // Returns a Promise. Resolves when all steps done or skipped.
+  run() {
+    return new Promise(resolve => {
+      this._resolve  = resolve;
+      this._skipFlag = false;
+      document.getElementById('setup-screen').hidden = false;
+      this._runSteps();
+    });
+  },
+
+  finish() {
+    document.getElementById('setup-screen').hidden = true;
+    if (this._resolve) { this._resolve(); this._resolve = null; }
+  },
+
+  async _runSteps() {
+    const results = { fingerOffsets: [null, null, null, null], toleranceCents: null };
+
+    // Step 1: Pitch calibration - play D4
+    const pitchOk = await this._stepPitch(results);
+    if (this._skipFlag || !pitchOk) { this.finish(); return; }
+
+    // Steps 2-5: finger positions
+    const fingerSteps = [
+      { fingerIndex: 0, label: 'Open string', instruction: 'Hold your erhu normally - do not press any finger. Hold for 2 seconds.' },
+      { fingerIndex: 1, label: '1st finger',  instruction: 'Place your 1st finger on the D string and hold for 2 seconds.' },
+      { fingerIndex: 2, label: '2nd finger',  instruction: 'Place your 2nd finger on the D string and hold for 2 seconds.' },
+      { fingerIndex: 3, label: '3rd finger',  instruction: 'Place your 3rd finger on the D string and hold for 2 seconds.' },
+    ];
+
+    for (const step of fingerSteps) {
+      if (this._skipFlag) break;
+      await this._stepFingerOffset(step, results);
+    }
+
+    // Save whatever we measured - partial results still help
+    this._saveResults(results);
+    this.finish();
+  },
+
+  // Plays D4 calibration step - reuses AppState.calib measurement path
+  _stepPitch(results) {
+    return new Promise(resolve => {
+      this._setUI('Step 1 of 5 - Pitch', 'Play the open D string (D4) and hold it steady.', '', '');
+      let countdown = 4;
+      this._setCountdown(countdown);
+
+      const samples = [];
+      const interval = setInterval(() => {
+        if (this._skipFlag) { clearInterval(interval); resolve(false); return; }
+
+        const hz = AppState.frame.detectedHz;
+        if (hz !== null) samples.push(hz);
+
+        this._setFeedback(hz ? `hearing: ${_closestNoteFromHz(hz) || '...'}` : 'play D4 now...');
+
+        countdown--;
+        this._setCountdown(Math.max(0, countdown));
+
+        if (countdown <= 0) {
+          clearInterval(interval);
+          if (samples.length >= 5) {
+            // Compute variance and set tolerance (same formula as Calibration._finalize)
+            const mean     = samples.reduce((a, b) => a + b, 0) / samples.length;
+            const variance = samples.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / samples.length;
+            const centSpread = Math.abs(_hzToCents(mean + Math.sqrt(variance), mean));
+            const tol  = Math.max(25, Math.min(70, Math.round(centSpread * 2.5 + 15)));
+            AppState.calib.toleranceCents = tol;
+            results.toleranceCents        = tol;
+            this._setFeedback(`Tolerance set to ${tol} cents`);
+          }
+          setTimeout(() => resolve(true), 600);
+        }
+      }, 1000);
+    });
+  },
+
+  // Measures wrist Y for one finger position
+  _stepFingerOffset(step, results) {
+    return new Promise(resolve => {
+      const stepNum = step.fingerIndex + 2;
+      this._setUI(`Step ${stepNum} of 5 - ${step.label}`, step.instruction, '', '');
+      let countdown = 3;
+      this._setCountdown(countdown);
+
+      const samples = [];
+      const interval = setInterval(() => {
+        if (this._skipFlag) { clearInterval(interval); resolve(); return; }
+
+        // Read left wrist Y and left shoulder Y from last landmarks
+        const poseLm = CVPipeline._lastPoseLandmarks;
+        const handResult = CVPipeline._lastHandResult;
+
+        if (poseLm && poseLm[11] && handResult && handResult.landmarks && handResult.landmarks.length) {
+          let leftLm = null;
+          if (handResult.handedness && handResult.handedness.length) {
+            const idx = handResult.handedness.findIndex(h => h[0] && h[0].categoryName === 'Right');
+            if (idx >= 0) leftLm = handResult.landmarks[idx];
+          }
+          if (!leftLm) leftLm = handResult.landmarks[0];
+          const wrist = leftLm[0];
+          if (wrist) {
+            const offset = wrist.y - poseLm[11].y;
+            samples.push(offset);
+            this._setFeedback('measuring...');
+          }
+        } else {
+          this._setFeedback(AppState.status.mediapipeOk ? 'show your left hand' : 'camera loading...');
+        }
+
+        countdown--;
+        this._setCountdown(Math.max(0, countdown));
+
+        if (countdown <= 0) {
+          clearInterval(interval);
+          if (samples.length >= 2) {
+            const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+            results.fingerOffsets[step.fingerIndex] = avg;
+            this._setFeedback('Saved');
+          } else {
+            this._setFeedback('Not enough data - using default');
+          }
+          setTimeout(() => resolve(), 700);
+        }
+      }, 1000);
+    });
+  },
+
+  _saveResults(results) {
+    const data = Storage.load() || Storage.defaultData();
+    data.setup = {
+      completedAt:    new Date().toISOString(),
+      toleranceCents: results.toleranceCents,
+      fingerOffsets:  results.fingerOffsets,
+    };
+    Storage.save(data);
+
+    // Apply finger offsets to runtime immediately
+    if (results.fingerOffsets.some(v => v !== null)) {
+      AppState._setupFingerOffsets = results.fingerOffsets;
+    }
+  },
+
+  _setUI(stepLabel, instruction, countdown, feedback) {
+    document.getElementById('setup-step-label').textContent   = stepLabel;
+    document.getElementById('setup-instruction').textContent  = instruction;
+    document.getElementById('setup-countdown').textContent    = countdown;
+    document.getElementById('setup-feedback').textContent     = feedback;
+  },
+  _setCountdown(n) { document.getElementById('setup-countdown').textContent = n > 0 ? n : ''; },
+  _setFeedback(msg) { document.getElementById('setup-feedback').textContent = msg; },
+};
 
 function _setDScaleMode(enabled) {
   AppState._dScaleMode = enabled;
@@ -4194,20 +4648,27 @@ document.getElementById('btn-start').addEventListener('click', async () => {
     btn.textContent = 'Allow microphone…';
     await initMic();
 
-    // Step 4: permissions done — proceed to calibration screen
-    document.getElementById('start-screen').hidden      = true;
-    document.getElementById('calibration-screen').hidden = false;
-    AppState.lifecycle = 'calibrating';
-
-    // Start loading MediaPipe in background while user calibrates.
-    // Reveal skip button only when models are ready so the skeleton
-    // is guaranteed to be active the moment they enter the practice screen.
+    // Step 4: show positioning screen — player aligns to camera before calibration.
+    // MediaPipe loads in background while they position themselves.
+    document.getElementById('start-screen').hidden = true;
     CVPipeline.init().then(() => {
       document.getElementById('btn-skip-calib').hidden = false;
     }).catch(() => {
-      // MediaPipe failed — still allow skip, session runs audio-only
       document.getElementById('btn-skip-calib').hidden = false;
     });
+
+    await new Promise(resolve => {
+      PositioningScreen.show(CVPipeline.stream, async (action) => {
+        if (action === 'setup') {
+          await SetupCheck.run();
+        }
+        resolve();
+      });
+    });
+
+    // Step 5 (was 4): proceed to calibration
+    document.getElementById('calibration-screen').hidden = false;
+    AppState.lifecycle = 'calibrating';
 
     // Step 5: init audio pipeline (imports Pitchy, wires AnalyserNode)
     // Must happen after initMic() has created AudioPipeline.audioCtx.
@@ -4253,6 +4714,29 @@ document.getElementById('btn-start').addEventListener('click', async () => {
 document.getElementById('btn-skip-calib').addEventListener('click', () => {
   Calibration.skip();
   enterApp();
+});
+
+// ---- Positioning screen buttons ----
+document.getElementById('btn-position-continue').addEventListener('click', () => {
+  if (PositioningScreen._onDone) {
+    const cb = PositioningScreen._onDone;
+    PositioningScreen._onDone = null;
+    PositioningScreen.hide();
+    cb('continue');
+  }
+});
+document.getElementById('btn-setup-check').addEventListener('click', () => {
+  if (PositioningScreen._onDone) {
+    const cb = PositioningScreen._onDone;
+    PositioningScreen._onDone = null;
+    PositioningScreen.hide();
+    cb('setup');
+  }
+});
+
+// ---- Setup check skip button ----
+document.getElementById('btn-setup-skip').addEventListener('click', () => {
+  SetupCheck._skipFlag = true;
 });
 
 // ---- D-scale mode toggle ----
