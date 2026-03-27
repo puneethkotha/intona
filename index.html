@@ -631,6 +631,19 @@
       padding: 10px 24px; font-size: 13px; font-weight: 500;
       cursor: pointer; font-family: var(--font);
     }
+    /* Pulsing glow on active neck position when waiting for player to play */
+    @keyframes neck-pulse {
+      0%, 100% { filter: drop-shadow(0 0 0px transparent); }
+      50%       { filter: drop-shadow(0 0 6px var(--teal)); }
+    }
+    #neck-active.pulsing { animation: neck-pulse 1.2s ease-in-out infinite; }
+    /* D-scale toggle label */
+    .dscale-label {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; color: var(--text-dim);
+      margin-bottom: 6px; cursor: pointer;
+    }
+    .dscale-label input { accent-color: var(--teal); }
   </style>
 </head>
 <body>
@@ -874,6 +887,10 @@
     <!-- SVG structure extracted from erhu_note_comparison_panel.html -->
     <div id="finger-guide" class="panel">
       <div class="panel-label">Finger Guide</div>
+      <label class="dscale-label">
+        <input type="checkbox" id="dscale-toggle">
+        D-scale only
+      </label>
       <svg id="neck-svg" width="100" height="160" viewBox="0 0 100 160">
         <!-- Neck body -->
         <rect x="36" y="8" width="28" height="144" rx="4"
@@ -993,6 +1010,11 @@ let NOTES            = null;  // Array of note objects
 let SESSION_TEMPLATE = null;  // Array of phase objects
 let MESSAGES         = null;  // Coaching message strings
 let NOTES_BY_ID      = {};    // id → note object, built after load
+
+// D-scale notes on a standard D-A erhu (first position)
+// D string: D4 open, E4 1st, F#4 2nd, G4 3rd, A4 4th
+// A string: A4 open, B4 1st, C#5 2nd, D5 3rd, E5 4th
+const D_SCALE_NOTES = new Set(['D4','E4','F#4','G4','A4','B4','C#5','D5','E5']);
 
 const CONFIG = {
   // --- Drill timing ---
@@ -1150,6 +1172,7 @@ const AppState = {
   _slowLoop:        null,  // setInterval handle for slow loop (cleared on session end / Practice Again)
   _pieceMode:       { enabled: false, piece: null },
   _syntheticTemplate: null,
+  _dScaleMode:      false, // runtime mirror of stored dScale.enabled
 };
 
 
@@ -1258,10 +1281,11 @@ function _angleDeg(a, b, c) {
    Implemented in Milestone 6.
 ================================================================ */
 const CVPipeline = {
-  poseLandmarker:  null,
-  handLandmarker:  null,
-  stream:          null,   // MediaStream from initCamera(), assigned in M2
-  _lastHandResult: null,   // retained across frames in case hand step is skipped
+  poseLandmarker:    null,
+  handLandmarker:    null,
+  stream:            null,   // MediaStream from initCamera(), assigned in M2
+  _lastHandResult:   null,   // retained across frames in case hand step is skipped
+  _lastPoseLandmarks: null,  // retained for slow-loop consumers (e.g. left hand height check)
 
   async init() {
     // vision_bundle.mjs is the only correct URL — vision_bundle.js does not exist on the CDN.
@@ -1327,6 +1351,7 @@ const CVPipeline = {
 
     if (poseResult.landmarks && poseResult.landmarks.length > 0) {
       const lm = poseResult.landmarks[0];
+      this._lastPoseLandmarks = lm;  // stored for slow-loop consumers
 
       // poseConfidence = mean visibility of key upper-body landmarks
       const keyIdx = [11, 12, 13, 14, 15, 16];
@@ -1747,7 +1772,13 @@ const NoteScheduler = {
       const all     = drill.noteIds || [];
       const maxEnd  = AppState.difficulty.noteRangeEnd;
       // Always include at least 2 notes so a scale isn't trivial
-      return all.slice(0, Math.max(2, maxEnd));
+      let filtered  = all.slice(0, Math.max(2, maxEnd));
+      // D-scale mode: restrict to D-scale notes only
+      if (AppState._dScaleMode) {
+        const ds = filtered.filter(id => D_SCALE_NOTES.has(id));
+        filtered  = ds.length >= 1 ? ds : ['D4']; // safety floor
+      }
+      return filtered;
     }
     return [];
   },
@@ -2860,6 +2891,8 @@ const UIRenderer = {
       active.setAttribute('stroke-dasharray', '0');
       active.setAttribute('r', '7');
     }
+    // Pulse the dot when waiting for player to play
+    active.classList.toggle('pulsing', AppState.drill.state === 'WAITING');
 
     // Next note indicator (faint)
     if (next) {
@@ -2960,6 +2993,27 @@ const UIRenderer = {
     if (!poseResult || !poseResult.landmarks || !poseResult.landmarks.length) return;
 
     const lm = poseResult.landmarks[0];
+
+    // --- Bow arm ghost overlay ---
+    // Draws a faint dashed reference arc (right shoulder -> reference elbow -> reference wrist)
+    // showing where the bow arm should roughly sit for D-scale playing. Very low opacity.
+    const rs = lm[12]; // right shoulder (camera-right = player's bow arm)
+    if (rs && (rs.visibility || 0) > 0.45) {
+      const refElbow = { x: rs.x - 0.12, y: rs.y + 0.04 };
+      const refWrist = { x: rs.x - 0.22, y: rs.y + 0.04 };
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = '#EF9F27'; // amber — same hue as live bow arm
+      ctx.lineWidth   = 4;
+      ctx.lineCap     = 'round';
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.moveTo(rs.x * W,          rs.y * H);
+      ctx.lineTo(refElbow.x * W,    refElbow.y * H);
+      ctx.lineTo(refWrist.x * W,    refWrist.y * H);
+      ctx.stroke();
+      ctx.restore(); // restores globalAlpha, lineDash, strokeStyle atomically
+    }
 
     // landmark index → canvas px, accounting for mirroring if needed
     const px = (p) => [p.x * W, p.y * H];
@@ -3904,6 +3958,60 @@ function enterApp() {
     }
   };
 
+  // --- Left hand height check ---
+  // Reads left wrist Y from MediaPipe hand result, compares to expected range
+  // for the current note's finger position. Writes to AppState.feedback only
+  // during WAITING state so it never stomps on rep-level pitch corrections.
+  function _checkLeftHandHeight() {
+    if (AppState.lifecycle !== 'session') return;
+    const note = AppState.scheduler.currentNote;
+    if (!note) return;
+    if (AppState.frame.poseConfidence < 0.5) return;
+    if (AppState.drill.state !== 'WAITING') return; // only guide before the attempt
+
+    const handResult = CVPipeline._lastHandResult;
+    if (!handResult || !handResult.landmarks || !handResult.landmarks.length) return;
+
+    // Identify player's left (finger) hand.
+    // MediaPipe handedness is camera-perspective: 'Right' = camera-right = player's left
+    // when player faces the camera (standard practice setup).
+    let leftLm = null;
+    if (handResult.handedness && handResult.handedness.length) {
+      const idx = handResult.handedness.findIndex(
+        h => h[0] && h[0].categoryName === 'Right'
+      );
+      if (idx >= 0) leftLm = handResult.landmarks[idx];
+    }
+    if (!leftLm) leftLm = handResult.landmarks[0]; // fallback
+
+    const wrist = leftLm[0];
+    if (!wrist) return;
+
+    const poseLm = CVPipeline._lastPoseLandmarks;
+    if (!poseLm || !poseLm[11]) return;
+
+    const shoulderY = poseLm[11].y;
+    // Expected wrist Y offsets from shoulder per finger position (normalised coords)
+    // Negative = higher in frame (smaller Y). Approximation; tuned for typical seated posture.
+    const FINGER_OFFSETS = [-0.05, -0.12, -0.18, -0.24];
+    const expectedY  = shoulderY + (FINGER_OFFSETS[note.fingerIndex] || -0.05);
+    const tolerance  = 0.07;
+    const actualY    = wrist.y;
+
+    const prev = AppState.feedback.message;
+    if (actualY < expectedY - tolerance) {
+      AppState.feedback.message = 'left hand too high';
+      AppState.feedback.color   = 'var(--amber)';
+    } else if (actualY > expectedY + tolerance) {
+      AppState.feedback.message = 'left hand too low';
+      AppState.feedback.color   = 'var(--amber)';
+    } else if (prev === 'left hand too high' || prev === 'left hand too low') {
+      // Only confirm "good" if we were already showing a hand-position message
+      AppState.feedback.message = 'position looks right';
+      AppState.feedback.color   = 'var(--teal)';
+    }
+  }
+
   // --- Slow loop (200ms) ---
   // Calls updateOverlays() every window tick.
   // M7 adds ScoringEngine.computeWindow() here.
@@ -3915,6 +4023,7 @@ function enterApp() {
     DrillEngine.evaluate();           // M8: advance hold-drill state machine
     AdaptiveDifficulty.evaluate();    // M8: nudge bpm/range/focusSkill on streaks
     FeedbackSelector.select();        // M9: pick one coaching message per rep
+    _checkLeftHandHeight();           // D-scale: left hand position guide
     _checkSessionHealth();            // M10: no-body-in-frame guard
     UIRenderer.updateOverlays();
   }, CONFIG.windowMs);
@@ -4041,9 +4150,25 @@ function _hydrateStartScreen() {
     sec.hidden = false;
   }
 
+  // D-scale mode: restore toggle state from storage
+  if (data.dScale && data.dScale.enabled) {
+    AppState._dScaleMode = true;
+    const tog = document.getElementById('dscale-toggle');
+    if (tog) tog.checked = true;
+  }
+
   // Update lastSeenAt
   data.profile.lastSeenAt = new Date().toISOString();
   Storage.save(data);
+}
+
+function _setDScaleMode(enabled) {
+  AppState._dScaleMode = enabled;
+  const data = Storage.load() || Storage.defaultData();
+  data.dScale = { enabled };
+  Storage.save(data);
+  const tog = document.getElementById('dscale-toggle');
+  if (tog) tog.checked = enabled;
 }
 
 // Call immediately on page load
@@ -4128,6 +4253,11 @@ document.getElementById('btn-start').addEventListener('click', async () => {
 document.getElementById('btn-skip-calib').addEventListener('click', () => {
   Calibration.skip();
   enterApp();
+});
+
+// ---- D-scale mode toggle ----
+document.getElementById('dscale-toggle').addEventListener('change', (e) => {
+  _setDScaleMode(e.target.checked);
 });
 
 // ---- Add piece button ----
